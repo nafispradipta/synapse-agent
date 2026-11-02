@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synapse-cortex"
+version = "1.0.3"
+description = "Biomimetic cognitive graph memory, spreading activation, and progressive context packing for autonomous AI agents."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    {name = "Nafis Pradipta", email = "halo@nafispradipta.id"}
+]
+keywords = [
+    "memory",
+    "cognitive",
+    "synapse",
+    "graph-memory",
+    "spreading-activation",
+    "llm-context",
+    "ai-agent",
+    "mcp"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/nafispradipta/synapse-agent"
+Repository = "https://github.com/nafispradipta/synapse-agent"
+Issues = "https://github.com/nafispradipta/synapse-agent/issues"
+Changelog = "https://github.com/nafispradipta/synapse-agent/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+]
+
+[project.scripts]
+synapse-mcp = "synapse.mcp:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["synapse*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]

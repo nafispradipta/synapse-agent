@@ -1,0 +1,39 @@
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Databases and SQLite Artifacts
+*.db
+*.db-*
+*.db-wal
+*.db-shm
+data/
+synapse.db
+
+# Data Snapshots, Archives, & Caches
+data/*.gz
+data/*.bak
+data/*.json
+
+# Logs & PIDs
+logs/
+*.pid
+logs/*.log
+*.log
+
+# Bytecode & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.coverage.*
+
+# Egg and Build Distributions
+*.egg-info/
+dist/
+build/
+
+# Local Environment Secrets
+.env
