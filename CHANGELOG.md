@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-11-02
+
+### Fixed
+- **Regex Substring Boundary Trap in Operational Status:** Replaced raw substring checks with strict regex word boundaries (`\b`) for negative and lifecycle status phrases. Words containing root substrings such as `mati` (e.g., `otomatis`, `automatic`, `sistematis`, `systematic`, `informatika`) are no longer erroneously parsed as `inactive`.
+- **Expanded Test Suite:** 255 automated tests verifying word-boundary immunity and eliminating false-positive task supersession.
+
 ## [1.0.3] - 2026-11-02
 
 ### Added

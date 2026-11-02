@@ -665,3 +665,30 @@ def test_software_version_downgrade_guard(tmp_path: Path) -> None:
     assert len(active) == 1
     assert "Rollback" in active[0]["l0_abstract"]
     adapter.storage.close()
+
+
+def test_word_boundary_immunity_for_otomatis_and_automatic(tmp_path: Path) -> None:
+    """Verify words containing 'mati' as substring (otomatis, automatic, sistematis) are NOT parsed as inactive."""
+    from synapse.contradiction_resolver import extract_status_flags
+
+    assert extract_status_flags("Deploy otomatis via CI") != "inactive"
+    assert extract_status_flags("Backup otomatis tiap hari") != "inactive"
+    assert extract_status_flags("Proses sistematis") != "inactive"
+    assert extract_status_flags("Deployment is automatic") != "inactive"
+    assert extract_status_flags("Deploys automatically every night") != "inactive"
+    assert extract_status_flags("System is systematic") != "inactive"
+
+    # Actual inactive statements must still work
+    assert extract_status_flags("Server produksi mati") == "inactive"
+    assert extract_status_flags("Server produksi tidak aktif") == "inactive"
+
+    db_file = str(tmp_path / "test_otomatis_collision.db")
+    adapter = SynapseAdapter({"db_path": db_file})
+    assert adapter.storage is not None
+
+    adapter.retain("Backup database otomatis berjalan setiap tengah malam.", salience=0.6)
+    adapter.retain("Backup database manual berjalan setiap pagi.", salience=0.9)
+
+    active = adapter.storage.list_nodes(status="active")
+    assert len(active) == 2, "Automatic and manual backups must both stay active without false supersede"
+    adapter.storage.close()

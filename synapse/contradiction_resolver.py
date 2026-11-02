@@ -218,6 +218,28 @@ def extract_numeric_specs(text: str) -> Dict[str, Tuple[float, str]]:
     return specs
 
 
+INACTIVE_PHRASE_PATTERNS: List[re.Pattern[str]] = [
+    re.compile(
+        r"\b(not\s+active|is\s+not\s+active|tidak\s+aktif|tidak\s+berjalan|belum\s+jalan|tidak\s+hidup|tidak\s+menyala|non[\s\-_]+aktif)\b",
+        re.IGNORECASE,
+    )
+]
+
+PROGRESS_PHRASE_PATTERNS: List[re.Pattern[str]] = [
+    re.compile(
+        r"\b(in[- ]progress|underway|ongoing|in\s+development|\bwip\b|sedang\s+berjalan|dalam\s+proses|sedang\s+dikerjakan|belum\s+selesai)\b",
+        re.IGNORECASE,
+    )
+]
+
+COMPLETED_PHRASE_PATTERNS: List[re.Pattern[str]] = [
+    re.compile(
+        r"\b(completed|complete|finished|resolved|closed|shipped|sudah\s+selesai|selesai|tuntas|berhasil)\b",
+        re.IGNORECASE,
+    )
+]
+
+
 def extract_status_flags(
     text: str,
     custom_progress_terms: Optional[Set[str]] = None,
@@ -228,34 +250,22 @@ def extract_status_flags(
         return None
     lower = text.lower()
 
-    # Check multi-word negation phrases for inactive status first
-    inactive_phrases = (
-        "not active", "is not active", "tidak aktif", "tidak berjalan", "belum jalan",
-        "tidak hidup", "tidak menyala", "mati", "non aktif", "non-aktif"
-    )
-    if any(k in lower for k in inactive_phrases):
+    # 1. Multi-word negation phrases for inactive status (with strict word boundaries)
+    if any(p.search(lower) for p in INACTIVE_PHRASE_PATTERNS):
         return "inactive"
 
-    progress_terms = (
-        "in progress", "in-progress", "underway", "ongoing", "in development", "wip",
-        "sedang berjalan", "dalam proses", "sedang dikerjakan", "belum selesai"
-    )
-    if custom_progress_terms:
-        progress_terms = tuple(set(progress_terms) | custom_progress_terms)
-
-    completed_terms = (
-        "completed", "complete", "finished", "resolved", "closed", "shipped",
-        "sudah selesai", "selesai", "tuntas", "berhasil"
-    )
-    if custom_completed_terms:
-        completed_terms = tuple(set(completed_terms) | custom_completed_terms)
-
-    # Check task lifecycle progress vs completion
-    if any(k in lower for k in progress_terms):
+    # 2. Check task lifecycle progress vs completion (with strict word boundaries)
+    if any(p.search(lower) for p in PROGRESS_PHRASE_PATTERNS) or (
+        custom_progress_terms and any(re.search(r"\b" + re.escape(t) + r"\b", lower) for t in custom_progress_terms)
+    ):
         return "in_progress"
-    if any(k in lower for k in completed_terms):
+
+    if any(p.search(lower) for p in COMPLETED_PHRASE_PATTERNS) or (
+        custom_completed_terms and any(re.search(r"\b" + re.escape(t) + r"\b", lower) for t in custom_completed_terms)
+    ):
         return "completed"
 
+    # 3. Single-word token matching (strict regex tokenization)
     words = set(re.findall(r"[a-zA-Z0-9_\-]+", lower))
 
     is_active = bool(words & ACTIVE_STATUS_TERMS)

@@ -5,7 +5,7 @@
 [![PyPI: synapse-cortex](https://img.shields.io/pypi/v/synapse-cortex.svg)](https://pypi.org/project/synapse-cortex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-brightgreen.svg)](pyproject.toml)
-[![Tests: 254 Passed](https://img.shields.io/badge/Tests-254%20Passed-success.svg)](tests/)
+[![Tests: 255 Passed](https://img.shields.io/badge/Tests-255%20Passed-success.svg)](tests/)
 [![Architecture: Local--First](https://img.shields.io/badge/Architecture-Local--First%20SQLite%20WAL-purple.svg)](synapse/storage.py)
 
 ---
