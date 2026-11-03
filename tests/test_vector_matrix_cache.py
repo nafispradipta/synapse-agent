@@ -323,8 +323,8 @@ class TestPurePythonFallback:
         n1 = storage.add_node(uri="synapse://test/mock_np", l0_abstract="Mock Np", category="general")
         storage.upsert_vector(n1, [0.6, 0.8])
 
-        monkeypatch.setattr("synapse.storage._NUMPY_AVAILABLE", False)
-        monkeypatch.setattr("synapse.storage.np", None)
+        monkeypatch.setattr("synapse.stores.vectors._NUMPY_AVAILABLE", False)
+        monkeypatch.setattr("synapse.stores.vectors.np", None)
 
         hits = storage.search_vectors([0.6, 0.8], top_k=5)
         assert len(hits) == 1

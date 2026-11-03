@@ -34,13 +34,13 @@ def storage():
 def test_no_production_module_reaches_into_storage_private_connection():
     pattern = re.compile(r"storage\._(?:conn|lock)\b")
     offenders = []
-    for path in sorted(SYNAPSE_DIR.glob("*.py")):
+    for path in sorted(SYNAPSE_DIR.rglob("*.py")):
         if path.name == "storage.py":
             continue
         text = path.read_text(encoding="utf-8")
         for match in pattern.finditer(text):
             line = text[: match.start()].count("\n") + 1
-            offenders.append(f"{path.name}:{line}")
+            offenders.append(f"{path.relative_to(SYNAPSE_DIR).as_posix()}:{line}")
     assert offenders == []
 
 

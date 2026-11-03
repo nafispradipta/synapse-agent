@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Storage Encapsulation:** `Retriever` and `Worker` no longer reach into `SynapseStorage._conn` / `_lock`. All cross-module database work now goes through named data-access methods (`bump_access_count`, `load_vector_index`, `iter_due_nodes`, `commit_superseded_rollup`, and friends), so locking and transaction boundaries stay inside one owner.
 - **Schema Initialisation Decomposed:** The 337-line `_init_schema` is now a short orchestrator over seven per-table helpers plus module-level `_DDL_*` constants and index/trigger tuples. The legacy `synapse_nodes` rebuild lives in its own method.
-- **Expanded Test Suite:** 289 automated tests, including 17 encapsulation guards and 17 schema-contract characterisation tests.
+- **Storage Split into Bounded Contexts:** `SynapseStorage` is now a 154-line facade over six mixins in `synapse/stores/` — `SchemaMixin` (DDL and migrations), `GraphStore` (nodes, edges, FTS), `VectorStore` (embeddings and the matrix cache), `EpisodeStore`, `KnowledgeStore` (mental models, observations, research) and `MaintenanceStore` (decay, rollups, compaction). The facade keeps the connection, the embedder hook, and cross-context aggregates such as `get_stats`. Method bodies moved verbatim; `from synapse.storage import SynapseStorage, VALID_CATEGORIES, VALID_STATUSES` keeps working.
+- **Expanded Test Suite:** 301 automated tests, including 17 encapsulation guards, 17 schema-contract characterisation tests and 12 bounded-context boundary tests.
 
 ### Fixed
 - **Legacy Node Migration Dropped `access_count`:** Rebuilding `synapse_nodes` for pre-1.0.3 databases recreated the table without `access_count`, so creating `idx_synapse_nodes_access_count` failed with `no such column: access_count`. The rebuild now carries the column over.
