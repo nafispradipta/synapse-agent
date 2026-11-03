@@ -7,10 +7,15 @@ the main database file, keeping the -wal file small and reads fast.
 
 import logging
 import os
-import sqlite3
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from synapse.storage import SynapseStorage
+
 DB_PATH = Path(os.environ.get("SYNAPSE_DB_PATH") or (PROJECT_ROOT / "data" / "synapse.db")).resolve()
 LOGS_DIR = Path(os.environ.get("SYNAPSE_LOGS_DIR") or (PROJECT_ROOT / "logs")).resolve()
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -25,14 +30,16 @@ def main() -> None:
     if not DB_PATH.exists():
         logger.error("Synapse DB not found at %s", DB_PATH)
         raise SystemExit(1)
-    conn = sqlite3.connect(str(DB_PATH))
+
+    storage = SynapseStorage(str(DB_PATH))
     try:
-        row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        busy, log, checkpointed = row
-        logger.info("wal_checkpoint(TRUNCATE): busy=%d log=%d checkpointed=%d",
-                    busy, log, checkpointed)
+        result = storage.wal_checkpoint()
+        logger.info(
+            "wal_checkpoint(TRUNCATE): busy=%d log=%d checkpointed=%d",
+            result["busy"], result["log"], result["checkpointed"],
+        )
     finally:
-        conn.close()
+        storage.close()
 
 
 if __name__ == "__main__":

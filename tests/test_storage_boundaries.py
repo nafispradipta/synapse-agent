@@ -71,6 +71,9 @@ METHOD_HOME = {
     MaintenanceStore: {
         "optimize_and_compact", "supersede_low_salience_nodes",
         "list_superseded_nodes", "commit_superseded_rollup",
+        "lock_critical_nodes", "apply_hebbian_decay", "prune_exhausted_nodes",
+        "prune_weak_edges", "upsert_vault_node", "optimize_fts_indices",
+        "verify_integrity", "wal_checkpoint",
     },
 }
 

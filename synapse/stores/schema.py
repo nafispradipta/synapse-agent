@@ -326,6 +326,8 @@ class SchemaMixin:
                 self._conn.execute("PRAGMA journal_mode=WAL;")
             self._conn.execute("PRAGMA synchronous=NORMAL;")
             self._conn.execute("PRAGMA foreign_keys=ON;")
+            # Stay compatible with concurrent writers holding the WAL briefly.
+            self._conn.execute("PRAGMA busy_timeout=10000;")
 
     def _init_schema(self) -> None:
         """Create tables, indexes, FTS5 virtual tables, and sync triggers."""

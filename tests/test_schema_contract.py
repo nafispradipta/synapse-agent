@@ -145,6 +145,10 @@ def test_foreign_keys_are_enforced(storage):
     assert storage._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
+def test_busy_timeout_allows_concurrent_writer_window(storage):
+    assert storage._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 10_000
+
+
 def test_node_fts_stays_in_sync_across_insert_update_delete(storage):
     node_id = storage.add_node(uri="synapse://test/fts", l0_abstract="Quantum widget")
 

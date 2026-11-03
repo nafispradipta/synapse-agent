@@ -7,12 +7,13 @@ Built with atomic transactions, double integrity checks, and high-salience prote
 import os
 import sys
 import glob
-import json
-import sqlite3
+import time
 import datetime
 from typing import Any, Dict, List, Optional
 
 from pathlib import Path
+
+from synapse.storage import SynapseStorage
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -54,9 +55,6 @@ LOG_FILE = os.path.join(LOGS_DIR, "consolidation.log")
 def get_timestamp_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-def get_utc_now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
-
 def log(msg):
     now_str = get_timestamp_now()
     entry = f"[{now_str}] {msg}"
@@ -75,15 +73,15 @@ def run_consolidation(
         log(f"CRITICAL ERROR: Database not found at {target_db}")
         sys.exit(1)
 
-    conn = sqlite3.connect(target_db)
-    cur = conn.cursor()
+    try:
+        storage = SynapseStorage(target_db)
+    except Exception as exc:
+        log(f"CRITICAL ERROR: Unable to open database at {target_db}: {exc}")
+        sys.exit(1)
 
     try:
         # Step 1: Pre-Execution Integrity Check
-        cur.execute("PRAGMA journal_mode=WAL;")
-        cur.execute("PRAGMA busy_timeout=10000;")
-        cur.execute("PRAGMA integrity_check")
-        integrity_pre = cur.fetchone()[0]
+        integrity_pre = storage.verify_integrity()
         if integrity_pre != "ok":
             raise RuntimeError(f"Pre-check database integrity failed: {integrity_pre}")
         log("Step 1: Pre-Execution DB Integrity -> OK (WAL Mode Verified)")
@@ -98,95 +96,50 @@ def run_consolidation(
             except Exception as e:
                 log(f"Warning on Step 1.5 episodic extraction: {e}")
 
-        now_iso = get_utc_now()
-
-        with conn:
-            # Step 2: Amigdala Protection & Hard Reinforcement
-            # Hard-lock all critical directives, preferences, and decisions to strength 1.0
-            cur.execute("""
-                UPDATE synapse_nodes
-                SET strength = 1.0, confidence = 1.0
-                WHERE salience >= 0.90 OR category IN ('preference', 'decision')
-            """)
-            protected_count = cur.rowcount
-            log(f"Step 2: Hard-locked Amigdala Salience nodes (Salience >= 0.90): {protected_count} nodes")
+        # Step 2: Amigdala Protection & Hard Reinforcement
+        # Hard-lock all critical directives, preferences, and decisions to strength 1.0
+        protected_count = storage.lock_critical_nodes()
+        log(f"Step 2: Hard-locked Amigdala Salience nodes (Salience >= 0.90): {protected_count} nodes")
 
         # Step 2.5: Episodic-to-Semantic Knowledge Consolidation
-        try:
-            sys.path.insert(0, BASE_DIR)
-            from synapse.worker import SynapseWorker
-            from synapse.storage import SynapseStorage
-
-            log("Step 2.5: Consolidating active episodic experiences into permanent semantic nodes...")
-            worker_storage = SynapseStorage(DB_PATH)
+        if not skip_external:
             try:
-                worker = SynapseWorker(storage=worker_storage)
+                sys.path.insert(0, BASE_DIR)
+                from synapse.worker import SynapseWorker
+
+                log("Step 2.5: Consolidating active episodic experiences into permanent semantic nodes...")
+                worker = SynapseWorker(storage=storage)
                 consolidation_stats = worker.consolidate_episodes_to_semantic(limit=10)
                 c_count = consolidation_stats.get("consolidated_count", 0)
                 mm_count = len(consolidation_stats.get("mental_models_updated", []))
                 status_str = consolidation_stats.get("status", "noop")
                 log(f"Step 2.5: Episodic Consolidation complete ({status_str}) -> {c_count} node(s) consolidated, {mm_count} mental model(s) updated")
-            finally:
-                worker_storage.close()
-        except Exception as e:
-            log(f"Step 2.5 Warning: Episodic-to-semantic consolidation error: {e}")
+            except Exception as e:
+                log(f"Step 2.5 Warning: Episodic-to-semantic consolidation error: {e}")
 
-        with conn:
-            # Step 3: Hebbian Decay Calculation (Only for non-critical, unaccessed dormant nodes)
-            # Handle mixed last_accessed types: integer unix timestamps AND ISO text strings
-            import time as _time
-            _cutoff_ts = int(_time.time()) - (14 * 86400)  # 14 days ago as unix timestamp
-            _cutoff_iso = datetime.datetime.fromtimestamp(_cutoff_ts, tz=datetime.timezone.utc).isoformat()
-            cur.execute("""
-                UPDATE synapse_nodes
-                SET strength = MAX(0.05, strength - 0.05)
-                WHERE salience < 0.80
-                  AND category NOT IN ('preference', 'decision', 'architecture', 'sop')
-                  AND status = 'active'
-                  AND (
-                    (typeof(last_accessed) = 'integer' AND last_accessed < ?)
-                    OR (typeof(last_accessed) = 'text' AND last_accessed < ?)
-                  )
-            """, (_cutoff_ts, _cutoff_iso))
-            decayed_count = cur.rowcount
-            log(f"Step 3: Applied Hebbian Decay to dormant nodes (>14 days idle): {decayed_count} nodes")
+        # Step 3: Hebbian Decay Calculation (Only for non-critical, unaccessed dormant nodes)
+        decayed_count = storage.apply_hebbian_decay(idle_days=14)
+        log(f"Step 3: Applied Hebbian Decay to dormant nodes (>14 days idle): {decayed_count} nodes")
 
-            # Step 4: Strict Safe Pruning (Only exhausted nodes with zero significance)
-            cur.execute("""
-                DELETE FROM synapse_nodes
-                WHERE salience < 0.25
-                  AND strength <= 0.05
-                  AND category NOT IN ('preference', 'decision', 'architecture', 'sop')
-            """)
-            pruned_count = cur.rowcount
-            log(f"Step 4: Safely pruned dead/exhausted nodes: {pruned_count} nodes")
+        # Step 4: Strict Safe Pruning (Only exhausted nodes with zero significance)
+        pruned_count = storage.prune_exhausted_nodes()
+        log(f"Step 4: Safely pruned dead/exhausted nodes: {pruned_count} nodes")
 
-            # Step 4.2: Automated Edge Decay & Pruning (Karpathy Graph Hygiene)
-            # Prune weak edges (<0.15) whose connected nodes are not high-salience (>=0.90)
-            cur.execute("""
-                DELETE FROM synapse_edges
-                WHERE weight < 0.15
-                  AND source_id NOT IN (SELECT id FROM synapse_nodes WHERE salience >= 0.90)
-                  AND target_id NOT IN (SELECT id FROM synapse_nodes WHERE salience >= 0.90)
-            """)
-            pruned_edges = cur.rowcount
-            log(f"Step 4.2: Safely pruned weak associative edges (< 0.15 weight): {pruned_edges} edges")
+        # Step 4.2: Automated Edge Decay & Pruning (Karpathy Graph Hygiene)
+        # Prune weak edges (<0.15) whose connected nodes are not high-salience (>=0.90)
+        pruned_edges = storage.prune_weak_edges(min_weight=0.15)
+        log(f"Step 4.2: Safely pruned weak associative edges (< 0.15 weight): {pruned_edges} edges")
 
         # Step 4.3: Abstract Rollup of Superseded Nodes (Maintain sub-10ms indices)
         try:
             sys.path.insert(0, BASE_DIR)
             from synapse.worker import SynapseWorker
-            from synapse.storage import SynapseStorage
-            rollup_storage = SynapseStorage(target_db)
-            try:
-                worker = SynapseWorker(storage=rollup_storage)
-                rollup_res = worker.rollup_superseded_nodes(min_count=50, backup_snapshot=True)
-                if rollup_res.get("status") == "success":
-                    log(f"Step 4.3: Abstract Rollup compressed {rollup_res['rolled_up_count']} superseded nodes into master entity '{rollup_res['master_entity_id']}'")
-                else:
-                    log(f"Step 4.3: Abstract Rollup -> {rollup_res.get('message', 'noop')}")
-            finally:
-                rollup_storage.close()
+            worker = SynapseWorker(storage=storage)
+            rollup_res = worker.rollup_superseded_nodes(min_count=50, backup_snapshot=True)
+            if rollup_res.get("status") == "success":
+                log(f"Step 4.3: Abstract Rollup compressed {rollup_res['rolled_up_count']} superseded nodes into master entity '{rollup_res['master_entity_id']}'")
+            else:
+                log(f"Step 4.3: Abstract Rollup -> {rollup_res.get('message', 'noop')}")
         except Exception as e:
             log(f"Step 4.3 Warning: Abstract Rollup error: {e}")
 
@@ -209,88 +162,78 @@ def run_consolidation(
         else:
             log("Step 4.5: Vault directory not specified or not found. Skipping MOC Bookkeeper.")
 
-        with conn:
-            # Step 5: Auto-Ingest & Synchronize Vault Notes with FTS (Full Vault Scan)
-            if not skip_vault_sync and vault_dir_path and os.path.isdir(vault_dir_path):
-                vault_notes = glob.glob(os.path.join(vault_dir_path, "**", "*.md"), recursive=True)
-                synced_vault = 0
-                import time as _time
-                _now_ts = int(_time.time())
-                for note_path in vault_notes:
-                    if "/_arsip/" in note_path or "/_archive/" in note_path or "/." in note_path or "/daily/" in note_path:
-                        continue
-                    rel_path = os.path.relpath(note_path, vault_dir_path)
-                    node_id = f"vault:{rel_path.replace('/', ':').replace('.md', '')}"
-                    
-                    try:
-                        with open(note_path, "r", encoding="utf-8") as nf:
-                            content = nf.read()
-                        
-                        lines = [l.strip() for l in content.split("\n") if l.strip()]
-                        title = rel_path
-                        for l in lines:
-                            if l.startswith("# "):
-                                title = l.replace("# ", "").strip()
-                                break
-                        
-                        l0 = title
-                        l1 = "\n".join(lines[:6])[:300]
-                        
+        # Step 5: Auto-Ingest & Synchronize Vault Notes with FTS (Full Vault Scan)
+        if not skip_vault_sync and vault_dir_path and os.path.isdir(vault_dir_path):
+            vault_notes = glob.glob(os.path.join(vault_dir_path, "**", "*.md"), recursive=True)
+            synced_vault = 0
+            _now_ts = int(time.time())
+            for note_path in vault_notes:
+                if "/_arsip/" in note_path or "/_archive/" in note_path or "/." in note_path or "/daily/" in note_path:
+                    continue
+                rel_path = os.path.relpath(note_path, vault_dir_path)
+                node_id = f"vault:{rel_path.replace('/', ':').replace('.md', '')}"
+
+                try:
+                    with open(note_path, "r", encoding="utf-8") as nf:
+                        content = nf.read()
+
+                    lines_ = [l.strip() for l in content.split("\n") if l.strip()]
+                    title = rel_path
+                    for l in lines_:
+                        if l.startswith("# "):
+                            title = l.replace("# ", "").strip()
+                            break
+
+                    l0 = title
+                    l1 = "\n".join(lines_[:6])[:300]
+
+                    category = "general"
+                    rel_lower = rel_path.lower()
+                    if "agent" in rel_lower or "engineering" in rel_lower:
+                        category = "architecture"
+                    elif "sop" in rel_lower:
+                        category = "sop"
+                    elif "server" in rel_lower or "cybersecurity" in rel_lower:
+                        category = "architecture"
+                    elif "finance" in rel_lower or "business" in rel_lower:
+                        category = "decision"
+                    elif "marketing" in rel_lower or "seo" in rel_lower:
                         category = "general"
-                        rel_lower = rel_path.lower()
-                        if "agent" in rel_lower or "engineering" in rel_lower:
-                            category = "architecture"
-                        elif "sop" in rel_lower:
-                            category = "sop"
-                        elif "server" in rel_lower or "cybersecurity" in rel_lower:
-                            category = "architecture"
-                        elif "finance" in rel_lower or "business" in rel_lower:
-                            category = "decision"
-                        elif "marketing" in rel_lower or "seo" in rel_lower:
-                            category = "general"
 
-                        # ON CONFLICT: update content but preserve last_accessed
-                        # so decay cycle can properly age nodes not actively recalled
-                        cur.execute("""
-                            INSERT INTO synapse_nodes (id, uri, l0_abstract, l1_overview, l2_target_path, category, importance, strength, created_at, last_accessed, status, salience, confidence)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(uri) DO UPDATE SET
-                                l0_abstract = excluded.l0_abstract,
-                                l1_overview = excluded.l1_overview,
-                                l2_target_path = excluded.l2_target_path,
-                                status = 'active'
-                        """, (node_id, f"vault://{rel_path}", l0, l1, note_path, category, 0.90, 1.0, _now_ts, _now_ts, "active", 0.95, 1.0))
+                    # Upsert content but preserve last_accessed so the decay
+                    # cycle can properly age nodes that are not recalled.
+                    effective_id = storage.upsert_vault_node(
+                        node_id=node_id,
+                        uri=f"vault://{rel_path}",
+                        l0_abstract=l0,
+                        l1_overview=l1,
+                        l2_target_path=note_path,
+                        category=category,
+                        importance=0.90,
+                        strength=1.0,
+                        salience=0.95,
+                        confidence=1.0,
+                        created_at=_now_ts,
+                    )
 
-                        # Auto-vectorization into synapse_vectors (384-dim)
-                        try:
-                            cur.execute("SELECT id FROM synapse_nodes WHERE uri = ?", (f"vault://{rel_path}",))
-                            row_id = cur.fetchone()
-                            target_id = row_id[0] if row_id else node_id
+                    # Auto-vectorization into synapse_vectors (384-dim)
+                    try:
+                        text_to_embed = f"{l0} {l1}".strip()
+                        if _embedder is not None and text_to_embed:
+                            vec = _embedder.embed(text_to_embed)
+                        else:
+                            vec = fallback_vectorize(text_to_embed, dim=384)
 
-                            text_to_embed = f"{l0} {l1}".strip()
-                            if _embedder is not None and text_to_embed:
-                                vec = _embedder.embed(text_to_embed)
-                            else:
-                                vec = fallback_vectorize(text_to_embed, dim=384)
+                        if vec:
+                            storage.upsert_vector(effective_id, vec)
+                    except Exception as ve:
+                        log(f"Warning: Vector generation skipped for {effective_id}: {ve}")
 
-                            if vec:
-                                cur.execute("""
-                                    INSERT INTO synapse_vectors (id, vector_json, dim, updated_at)
-                                    VALUES (?, ?, ?, ?)
-                                    ON CONFLICT(id) DO UPDATE SET
-                                        vector_json = excluded.vector_json,
-                                        dim = excluded.dim,
-                                        updated_at = excluded.updated_at
-                                """, (target_id, json.dumps(vec), len(vec), _now_ts))
-                        except Exception as ve:
-                            log(f"Warning: Vector generation skipped for {node_id}: {ve}")
-                        
-                        synced_vault += 1
-                    except Exception as e:
-                        log(f"Warning: Sync skipped for {note_path}: {e}")
+                    synced_vault += 1
+                except Exception as e:
+                    log(f"Warning: Sync skipped for {note_path}: {e}")
 
-                log(f"Step 5: Vault Notes Ingestion -> {synced_vault} markdown notes synced")
-            conn.commit()
+            log(f"Step 5: Vault Notes Ingestion -> {synced_vault} markdown notes synced")
 
         # Step 5.5: Semantic Graph Association (LLM Reflection) - Outside transaction block
         if not skip_external:
@@ -305,26 +248,25 @@ def run_consolidation(
         # Step 5.6: Auto-Contradiction Resolver & Mass Audit (Self-Correcting Engine)
         try:
             log("Step 5.6: Executing Auto-Contradiction Resolver & Mass Audit...")
-            run_contradiction_audit_step(target_db, log_fn=log)
+            sys.path.insert(0, BASE_DIR)
+            from synapse.contradiction_resolver import ContradictionResolver
+            resolver = ContradictionResolver(storage=storage)
+            contradictions = resolver.audit_all_contradictions()
+            log(f"Step 5.6: Contradiction audit complete -> {len(contradictions)} contradiction(s) resolved (outdated facts superseded)")
         except Exception as e:
             log(f"Step 5.6 Warning: Auto-contradiction resolver error: {e}")
 
-        with conn:
-            # Step 6: Optimize FTS5 Search Indices
-            try:
-                cur.execute("INSERT INTO synapse_fts(synapse_fts) VALUES('optimize')")
-            except Exception as e:
-                log(f"Note on FTS optimize: {e}")
-            
-            try:
-                cur.execute("INSERT INTO episodes_fts(episodes_fts) VALUES('optimize')")
-            except Exception:
-                pass
+        # Step 6: Optimize FTS5 Search Indices
+        fts_results = storage.optimize_fts_indices()
+        log(
+            "Step 6: FTS optimize -> synapse_fts: "
+            f"{'ok' if fts_results.get('synapse_fts') else 'failed'}, "
+            f"episodes_fts: {'ok' if fts_results.get('episodes_fts') else 'failed'}"
+        )
 
         # Step 7: VACUUM & Post-Execution Verification
-        cur.execute("VACUUM")
-        cur.execute("PRAGMA integrity_check")
-        integrity_post = cur.fetchone()[0]
+        storage.optimize_and_compact()
+        integrity_post = storage.verify_integrity()
         if integrity_post != "ok":
             raise RuntimeError(f"Post-execution integrity check failed: {integrity_post}")
         
@@ -332,12 +274,9 @@ def run_consolidation(
         log(f"Step 6 & 7: VACUUM & Post-Integrity Verified (OK). Final DB Size: {db_size_mb:.2f} MB")
 
     except Exception as e:
-        log(f"CRITICAL ROLLBACK: An error occurred during consolidation: {e}")
-        conn.rollback()
-        conn.close()
+        log(f"CRITICAL ERROR during consolidation: {e}")
+        storage.close()
         sys.exit(1)
-    finally:
-        conn.close()
 
     # Step 8: Trigger LLM Metacognitive Reflection Layer
     if not skip_external:
@@ -374,14 +313,9 @@ def run_consolidation(
         log("Step 9.5: Auto-Spawn Mental Model Detection & Creation...")
         try:
             sys.path.insert(0, BASE_DIR)
-            from synapse.storage import SynapseStorage
             from synapse.mental_model_spawner import run_auto_spawn_step
 
-            spawner_storage = SynapseStorage(target_db)
-            try:
-                created_count = run_auto_spawn_step(storage=spawner_storage, log_fn=log)
-            finally:
-                spawner_storage.close()
+            created_count = run_auto_spawn_step(storage=storage, log_fn=log)
             log(f"Step 9.5: Auto-Spawn complete -> {created_count} new mental model(s) created.")
         except Exception as e:
             log(f"Step 9.5 Warning: Auto-spawn mental model detection error: {e}")
@@ -394,24 +328,7 @@ def run_consolidation(
         log(f"Step 10 Warning: MOC Bookkeeper execution error: {e}")
 
     log("=== [SUCCESS] Nightly Synapse Consolidation Cycle Finished ===")
-
-def run_contradiction_audit_step(db_path: Optional[str] = None, log_fn=None) -> List[Dict[str, Any]]:
-    """Execute Auto-Contradiction Resolver mass audit on target database."""
-    _logger = log_fn or log
-    target_db = db_path or DB_PATH
-    _logger(f"Executing Auto-Contradiction Resolver mass audit on {target_db}...")
-    sys.path.insert(0, BASE_DIR)
-    from synapse.contradiction_resolver import ContradictionResolver
-    from synapse.storage import SynapseStorage
-
-    audit_storage = SynapseStorage(target_db)
-    try:
-        resolver = ContradictionResolver(storage=audit_storage)
-        contradictions = resolver.audit_all_contradictions()
-        _logger(f"Contradiction audit complete -> {len(contradictions)} contradiction(s) resolved (outdated facts superseded)")
-        return contradictions
-    finally:
-        audit_storage.close()
+    storage.close()
 
 def run_moc_update(vault_dir: Optional[str] = None, log_fn=None) -> Dict[str, List[str]]:
     """Synchronize Map of Content (MOC) index files across Obsidian Vault domains."""
