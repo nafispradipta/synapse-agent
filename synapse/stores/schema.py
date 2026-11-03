@@ -375,23 +375,32 @@ class SchemaMixin:
             return
         cursor.execute("PRAGMA legacy_alter_table=ON;")
         cursor.execute("PRAGMA foreign_keys=OFF;")
-        cursor.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old;")
-        cursor.execute(_DDL_SYNAPSE_NODES_REBUILT)
-        cursor.execute("""
-            INSERT INTO synapse_nodes (
-                id, uri, l0_abstract, l1_overview, l2_target_path,
-                category, importance, strength, created_at, last_accessed,
-                status, salience, confidence, access_count
-            )
-            SELECT
-                id, uri, l0_abstract, l1_overview, l2_target_path,
-                category, importance, strength, created_at, last_accessed,
-                status, salience, confidence, access_count
-            FROM _synapse_nodes_old;
-        """)
-        cursor.execute("DROP TABLE _synapse_nodes_old;")
-        cursor.execute("PRAGMA foreign_keys=ON;")
-        cursor.execute("PRAGMA legacy_alter_table=OFF;")
+        try:
+            cursor.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old;")
+            cursor.execute(_DDL_SYNAPSE_NODES_REBUILT)
+            cursor.execute("""
+                INSERT INTO synapse_nodes (
+                    id, uri, l0_abstract, l1_overview, l2_target_path,
+                    category, importance, strength, created_at, last_accessed,
+                    status, salience, confidence, access_count
+                )
+                SELECT
+                    id, uri, l0_abstract, l1_overview, l2_target_path,
+                    category, importance, strength, created_at, last_accessed,
+                    status, salience, confidence, access_count
+                FROM _synapse_nodes_old;
+            """)
+            cursor.execute("DROP TABLE _synapse_nodes_old;")
+        except Exception:
+            self._conn.rollback()
+            raise
+        else:
+            # The row copy opens an implicit transaction and PRAGMA foreign_keys
+            # is a no-op inside one, so commit first or enforcement stays off.
+            self._conn.commit()
+        finally:
+            cursor.execute("PRAGMA foreign_keys=ON;")
+            cursor.execute("PRAGMA legacy_alter_table=OFF;")
 
     def _create_edge_tables(self, cursor: Any) -> None:
         """Edges table and its indexes."""

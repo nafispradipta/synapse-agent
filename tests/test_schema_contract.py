@@ -237,3 +237,89 @@ def test_legacy_nodes_table_is_rebuilt_for_custom_categories_and_flagged_status(
         assert storage.get_node("synapse://legacy/two")["status"] == "flagged"
     finally:
         storage.close()
+
+
+def _write_legacy_db(db_file):
+    legacy = sqlite3.connect(db_file)
+    legacy.execute(
+        """
+        CREATE TABLE synapse_nodes (
+            id TEXT PRIMARY KEY,
+            uri TEXT UNIQUE NOT NULL,
+            l0_abstract TEXT NOT NULL,
+            l1_overview TEXT,
+            l2_target_path TEXT,
+            category TEXT DEFAULT 'general' CHECK(category IN ('preference', 'decision', 'general')),
+            importance REAL DEFAULT 0.5,
+            strength REAL DEFAULT 1.0,
+            created_at INTEGER,
+            last_accessed INTEGER,
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'superseded', 'archived'))
+        )
+        """
+    )
+    legacy.execute(
+        "INSERT INTO synapse_nodes (id, uri, l0_abstract) "
+        "VALUES ('legacy-1', 'synapse://legacy/one', 'Legacy node')"
+    )
+    legacy.commit()
+    legacy.close()
+
+
+def test_legacy_migration_keeps_foreign_key_enforcement(tmp_path):
+    """The rebuild flips foreign_keys off; it must flip it back on.
+
+    PRAGMA foreign_keys is a no-op inside a transaction, and the row copy opens
+    one, so the enforcement flag used to stay disabled for the lifetime of the
+    connection: ON DELETE CASCADE silently stopped working after a migration.
+    """
+    db_file = tmp_path / "legacy.db"
+    _write_legacy_db(db_file)
+
+    storage = SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+    try:
+        assert storage._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+        source = storage.add_node(uri="synapse://legacy/src", l0_abstract="source")
+        target = storage.add_node(uri="synapse://legacy/dst", l0_abstract="target")
+        storage.add_edge(source, target, relation="related")
+        assert len(storage.get_edges(target)) == 1
+
+        storage.delete_node(source)
+
+        assert storage.get_edges(target) == []
+    finally:
+        storage.close()
+
+
+class _FailingCopyCursor:
+    """Cursor double whose row copy fails after the pragmas have been flipped."""
+
+    def __init__(self):
+        self.statements = []
+
+    def execute(self, sql, params=()):
+        head = " ".join(sql.split())
+        self.statements.append(head[:40])
+        if head.startswith("INSERT INTO synapse_nodes"):
+            raise sqlite3.OperationalError("simulated copy failure")
+        return self
+
+    def fetchone(self):
+        return (
+            "CREATE TABLE synapse_nodes (category TEXT CHECK(category IN ('a', 'b')))",
+        )
+
+
+def test_rebuild_restores_pragmas_when_the_copy_fails(storage):
+    cursor = _FailingCopyCursor()
+
+    with pytest.raises(sqlite3.OperationalError):
+        storage._rebuild_obsolete_nodes_table(cursor)
+
+    assert "PRAGMA legacy_alter_table=ON;" in cursor.statements
+    assert "PRAGMA foreign_keys=OFF;" in cursor.statements
+    assert cursor.statements[-2:] == [
+        "PRAGMA foreign_keys=ON;",
+        "PRAGMA legacy_alter_table=OFF;",
+    ]
