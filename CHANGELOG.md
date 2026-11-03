@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Storage Encapsulation:** `Retriever` and `Worker` no longer reach into `SynapseStorage._conn` / `_lock`. All cross-module database work now goes through named data-access methods (`bump_access_count`, `load_vector_index`, `iter_due_nodes`, `commit_superseded_rollup`, and friends), so locking and transaction boundaries stay inside one owner.
+- **Schema Initialisation Decomposed:** The 337-line `_init_schema` is now a short orchestrator over seven per-table helpers plus module-level `_DDL_*` constants and index/trigger tuples. The legacy `synapse_nodes` rebuild lives in its own method.
+- **Expanded Test Suite:** 289 automated tests, including 17 encapsulation guards and 17 schema-contract characterisation tests.
+
+### Fixed
+- **Legacy Node Migration Dropped `access_count`:** Rebuilding `synapse_nodes` for pre-1.0.3 databases recreated the table without `access_count`, so creating `idx_synapse_nodes_access_count` failed with `no such column: access_count`. The rebuild now carries the column over.
+
 ## [1.0.4] - 2026-11-02
 
 ### Fixed
