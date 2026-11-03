@@ -49,9 +49,9 @@ METHOD_HOME = {
     GraphStore: {
         "add_node", "get_node", "record_node_access", "update_node", "delete_node",
         "supersede_node", "get_active_nodes", "list_nodes", "add_edge", "get_edges",
-        "search_fts", "resolve_wikilink_node", "find_active_node_by_l2_paths",
-        "list_active_vault_targets", "find_node_by_episode_ref",
-        "get_node_by_l2_target_path",
+        "prune_decayed_edges", "search_fts", "resolve_wikilink_node",
+        "find_active_node_by_l2_paths", "list_active_vault_targets",
+        "find_node_by_episode_ref", "get_node_by_l2_target_path",
     },
     VectorStore: {
         "upsert_vector", "get_vector", "incremental_cache", "vector_matrix",
@@ -69,7 +69,7 @@ METHOD_HOME = {
         "list_external_research", "promote_external_research",
     },
     MaintenanceStore: {
-        "optimize_and_compact", "prune_decayed_edges", "supersede_low_salience_nodes",
+        "optimize_and_compact", "supersede_low_salience_nodes",
         "list_superseded_nodes", "commit_superseded_rollup",
     },
 }

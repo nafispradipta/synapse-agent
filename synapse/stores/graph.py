@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import time
@@ -382,6 +383,57 @@ class GraphStore:
                 )
 
             return [dict(row) for row in cursor.fetchall()]
+
+    def prune_decayed_edges(
+        self,
+        decay_rate: float = 0.05,
+        prune_threshold: float = 0.15,
+        idle_days_threshold: float = 14.0,
+    ) -> Dict[str, int]:
+        """
+        Apply exponential decay to dormant edge weights (> idle_days_threshold days since last_fired)
+        and prune edges below prune_threshold, protecting edges connected to high-salience nodes (>= 0.90).
+        """
+        now = int(time.time())
+        cutoff_seconds = int(idle_days_threshold * 86400)
+        cutoff_ts = now - cutoff_seconds
+
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT source_id, target_id, relation, weight, last_fired
+                FROM synapse_edges
+                WHERE (last_fired IS NULL OR last_fired < ?)
+                  AND source_id NOT IN (SELECT id FROM synapse_nodes WHERE salience >= 0.90)
+                  AND target_id NOT IN (SELECT id FROM synapse_nodes WHERE salience >= 0.90)
+                """,
+                (cutoff_ts,),
+            )
+            rows = cursor.fetchall()
+            decayed = 0
+            pruned = 0
+
+            for row in rows:
+                s_id, t_id, rel, weight, last_f = row[0], row[1], row[2], float(row[3]), row[4]
+                last_ts = last_f or (now - cutoff_seconds)
+                elapsed_days = max(0.0, (now - last_ts) / 86400.0)
+                new_weight = weight * math.exp(-decay_rate * elapsed_days)
+
+                if new_weight < prune_threshold:
+                    self._conn.execute(
+                        "DELETE FROM synapse_edges WHERE source_id = ? AND target_id = ? AND relation = ?",
+                        (s_id, t_id, rel),
+                    )
+                    pruned += 1
+                else:
+                    self._conn.execute(
+                        "UPDATE synapse_edges SET weight = ? WHERE source_id = ? AND target_id = ? AND relation = ?",
+                        (round(new_weight, 4), s_id, t_id, rel),
+                    )
+                    decayed += 1
+
+            self._conn.commit()
+            return {"processed": len(rows), "decayed": decayed, "pruned": pruned}
 
     def _sanitize_fts_query(self, raw_query: str) -> str:
         """
