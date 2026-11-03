@@ -1990,6 +1990,323 @@ class SynapseStorage:
             "proof_count": 3,
         }
 
+    # ------------------------------------------------------------------
+    # Purpose-built queries used by the retriever and consolidation worker.
+    # Keeping them here means the SQLite schema and locking model stay
+    # private to this module.
+    # ------------------------------------------------------------------
+
+    def list_nodes_missing_vectors(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Active nodes that do not have an embedding vector stored yet."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT n.id, n.l0_abstract, n.l1_overview
+                FROM synapse_nodes n
+                LEFT JOIN synapse_vectors v ON v.id = n.id
+                WHERE n.status = 'active' AND v.id IS NULL
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def resolve_wikilink_node(
+        self,
+        raw: str,
+        clean: str,
+        clean_slug: str,
+        clean_stem: str,
+        stem: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a wikilink string to an active node via uri or vault path."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT * FROM synapse_nodes
+                WHERE status = 'active' AND (
+                    id = ?
+                    OR uri = ?
+                    OR uri = ?
+                    OR uri = ?
+                    OR l2_target_path = ?
+                    OR l2_target_path = ?
+                    OR l2_target_path LIKE ?
+                    OR l2_target_path LIKE ?
+                    OR l2_target_path LIKE ?
+                    OR uri LIKE ?
+                    OR uri LIKE ?
+                    OR uri LIKE ?
+                )
+                LIMIT 1
+                """,
+                (
+                    raw,
+                    f"vault:{clean}",
+                    f"synapse://sop/{clean_slug}",
+                    f"synapse://sop/{clean_stem}",
+                    raw,
+                    f"{clean}.md",
+                    f"%/{stem}.md",
+                    f"%/{clean}.md",
+                    f"%/{clean}",
+                    f"%/{clean_slug}",
+                    f"%/{clean_stem}",
+                    f"%:{clean}",
+                ),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def find_active_node_by_l2_paths(self, paths: List[str]) -> Optional[Dict[str, Any]]:
+        """Return the first active node whose l2_target_path matches any candidate."""
+        candidates = [str(p) for p in paths if p]
+        if not candidates:
+            return None
+        clause = " OR ".join("l2_target_path = ?" for _ in candidates)
+        with self._lock:
+            cursor = self._conn.execute(
+                f"SELECT * FROM synapse_nodes WHERE ({clause}) AND status = 'active' LIMIT 1",
+                tuple(candidates),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def list_active_vault_targets(self) -> List[Dict[str, Any]]:
+        """Active nodes that carry a vault path, for wikilink index building."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT id, uri, l2_target_path FROM synapse_nodes
+                WHERE l2_target_path IS NOT NULL AND status = 'active'
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def supersede_low_salience_nodes(
+        self, node_ids: List[str], salience_below: float = 0.90
+    ) -> int:
+        """Supersede the given nodes only while their salience stays below the cap."""
+        ids = [str(node_id) for node_id in node_ids if node_id]
+        if not ids:
+            return 0
+        updated = 0
+        with self._lock:
+            for node_id in ids:
+                cursor = self._conn.execute(
+                    "UPDATE synapse_nodes SET status = 'superseded' "
+                    "WHERE id = ? AND salience < ?",
+                    (node_id, float(salience_below)),
+                )
+                if cursor.rowcount and cursor.rowcount > 0:
+                    updated += cursor.rowcount
+            self._conn.commit()
+            if updated:
+                self._invalidate_vector_cache()
+        return updated
+
+    def _select_superseded_rows(self) -> List[Dict[str, Any]]:
+        cursor = self._conn.execute(
+            """
+            SELECT id, uri, l0_abstract, l1_overview, l2_target_path, category,
+                   importance, strength, created_at, last_accessed, salience,
+                   confidence, COALESCE(access_count, 0) as access_count
+            FROM synapse_nodes
+            WHERE status = 'superseded'
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def list_superseded_nodes(self) -> List[Dict[str, Any]]:
+        """All nodes currently marked superseded, with the rollup column set."""
+        with self._lock:
+            return self._select_superseded_rows()
+
+    def commit_superseded_rollup(
+        self,
+        master: Dict[str, Any],
+        rollup_id: str,
+        archived_at: Optional[int] = None,
+    ) -> Dict[str, int]:
+        """
+        Archive every currently superseded row, upsert the master rollup entity,
+        then purge superseded nodes and their edges in a single transaction.
+
+        The superseded set is re-read inside the lock so a node superseded after
+        the caller's snapshot is archived rather than deleted unarchived.
+        """
+        timestamp = int(archived_at) if archived_at is not None else int(time.time())
+        archived_rows = 0
+        with self._lock:
+            rows = self._select_superseded_rows()
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS synapse_superseded_archive (
+                    id TEXT PRIMARY KEY,
+                    uri TEXT,
+                    l0_abstract TEXT,
+                    l1_overview TEXT,
+                    l2_target_path TEXT,
+                    category TEXT,
+                    importance REAL,
+                    strength REAL,
+                    created_at INTEGER,
+                    last_accessed INTEGER,
+                    salience REAL,
+                    confidence REAL,
+                    access_count INTEGER,
+                    archived_at INTEGER,
+                    rollup_id TEXT
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_superseded_archive_cat "
+                "ON synapse_superseded_archive(category)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_superseded_archive_rollup "
+                "ON synapse_superseded_archive(rollup_id)"
+            )
+
+            for row in rows:
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO synapse_superseded_archive (
+                        id, uri, l0_abstract, l1_overview, l2_target_path, category,
+                        importance, strength, created_at, last_accessed, salience,
+                        confidence, access_count, archived_at, rollup_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["id"],
+                        row.get("uri"),
+                        row.get("l0_abstract"),
+                        row.get("l1_overview"),
+                        row.get("l2_target_path"),
+                        row.get("category"),
+                        row.get("importance"),
+                        row.get("strength"),
+                        row.get("created_at"),
+                        row.get("last_accessed"),
+                        row.get("salience"),
+                        row.get("confidence"),
+                        row.get("access_count", 0),
+                        timestamp,
+                        rollup_id,
+                    ),
+                )
+                archived_rows += 1
+
+            cur.execute(
+                """
+                INSERT INTO synapse_nodes (
+                    id, uri, l0_abstract, l1_overview, l2_target_path, category,
+                    importance, strength, created_at, last_accessed, status,
+                    salience, confidence, access_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    l0_abstract = excluded.l0_abstract,
+                    l1_overview = excluded.l1_overview,
+                    last_accessed = excluded.last_accessed,
+                    status = 'archived',
+                    salience = excluded.salience
+                ON CONFLICT(uri) DO UPDATE SET
+                    l0_abstract = excluded.l0_abstract,
+                    l1_overview = excluded.l1_overview,
+                    last_accessed = excluded.last_accessed,
+                    status = 'archived',
+                    salience = excluded.salience
+                """,
+                (
+                    master["id"],
+                    master["uri"],
+                    master.get("l0_abstract", ""),
+                    master.get("l1_overview", ""),
+                    None,
+                    "general",
+                    0.75,
+                    1.0,
+                    timestamp,
+                    timestamp,
+                    "archived",
+                    0.65,
+                    1.0,
+                    0,
+                ),
+            )
+
+            cur.execute(
+                """
+                DELETE FROM synapse_edges
+                WHERE source_id IN (SELECT id FROM synapse_nodes WHERE status = 'superseded')
+                   OR target_id IN (SELECT id FROM synapse_nodes WHERE status = 'superseded')
+                """
+            )
+            deleted_edges = cur.rowcount or 0
+
+            cur.execute("DELETE FROM synapse_nodes WHERE status = 'superseded'")
+            deleted_nodes = cur.rowcount or 0
+
+            try:
+                cur.execute("INSERT INTO synapse_fts(synapse_fts) VALUES('optimize')")
+            except Exception:
+                pass
+
+            self._conn.commit()
+            self._invalidate_vector_cache()
+
+        return {
+            "archived_rows": archived_rows,
+            "deleted_edges": deleted_edges,
+            "deleted_nodes": deleted_nodes,
+        }
+
+    def list_consolidatable_episodes(self, min_salience: float = 0.5) -> List[Dict[str, Any]]:
+        """Episodes that carry usable lessons and meet the salience floor."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT * FROM episodes
+                WHERE salience >= ?
+                  AND lessons_learned IS NOT NULL
+                  AND trim(lessons_learned) != ''
+                ORDER BY salience DESC, last_accessed DESC, created_at DESC
+                """,
+                (float(min_salience),),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def find_node_by_episode_ref(self, episode_id: str) -> Optional[Dict[str, Any]]:
+        """Find a node previously consolidated from the given episode."""
+        episode_id = str(episode_id)
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT id, uri FROM synapse_nodes
+                WHERE l2_target_path = ? OR uri LIKE ? OR uri LIKE ?
+                LIMIT 1
+                """,
+                (
+                    f"episode:{episode_id}",
+                    f"%://%/ep_{episode_id}%",
+                    f"%://%/episode_{episode_id}%",
+                ),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_node_by_l2_target_path(self, path: str) -> Optional[Dict[str, Any]]:
+        """Look up a node by its exact l2_target_path."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT id, uri FROM synapse_nodes WHERE l2_target_path = ? LIMIT 1",
+                (str(path),),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def close(self) -> None:
         """Close the database connection."""
         with self._lock:

@@ -354,17 +354,7 @@ class SynapseRetriever:
 
     def auto_index_missing_vectors(self) -> int:
         """Generate and store vectors for any active nodes in storage that lack vectors."""
-        with self.storage._lock:
-            cursor = self.storage._conn.execute(
-                """
-                SELECT n.id, n.l0_abstract, n.l1_overview
-                FROM synapse_nodes n
-                LEFT JOIN synapse_vectors v ON v.id = n.id
-                WHERE n.status = 'active' AND v.id IS NULL
-                LIMIT 100
-                """
-            )
-            missing = [dict(row) for row in cursor.fetchall()]
+        missing = self.storage.list_nodes_missing_vectors(limit=100)
 
         indexed_count = 0
         for node in missing:
@@ -503,46 +493,16 @@ class SynapseRetriever:
 
         # 2. Database query matching uri, l2_target_path, clean slug, stem, etc.
         try:
-            with self.storage._lock:
-                cur = self.storage._conn.execute(
-                    """
-                    SELECT * FROM synapse_nodes
-                    WHERE status = 'active' AND (
-                        id = ?
-                        OR uri = ?
-                        OR uri = ?
-                        OR uri = ?
-                        OR l2_target_path = ?
-                        OR l2_target_path = ?
-                        OR l2_target_path LIKE ?
-                        OR l2_target_path LIKE ?
-                        OR l2_target_path LIKE ?
-                        OR uri LIKE ?
-                        OR uri LIKE ?
-                        OR uri LIKE ?
-                    )
-                    LIMIT 1
-                    """,
-                    (
-                        raw_str,
-                        f"vault:{clean}",
-                        f"synapse://sop/{clean_slug}",
-                        f"synapse://sop/{clean_stem}",
-                        raw_str,
-                        f"{clean}.md",
-                        f"%/{stem}.md",
-                        f"%/{clean}.md",
-                        f"%/{clean}",
-                        f"%/{clean_slug}",
-                        f"%/{clean_stem}",
-                        f"%:{clean}",
-                    ),
-                )
-                row = cur.fetchone()
-                if row:
-                    node = dict(row)
-                    self._wikilink_node_id_cache[raw_str] = node["id"]
-                    return node
+            node = self.storage.resolve_wikilink_node(
+                raw=raw_str,
+                clean=clean,
+                clean_slug=clean_slug,
+                clean_stem=clean_stem,
+                stem=stem,
+            )
+            if node:
+                self._wikilink_node_id_cache[raw_str] = node["id"]
+                return node
         except Exception:
             pass
 
@@ -555,16 +515,12 @@ class SynapseRetriever:
                 if cand.is_file():
                     abs_cand = str(cand.resolve())
                     try:
-                        with self.storage._lock:
-                            cur = self.storage._conn.execute(
-                                "SELECT * FROM synapse_nodes WHERE (l2_target_path = ? OR l2_target_path = ?) AND status = 'active' LIMIT 1",
-                                (abs_cand, str(cand)),
-                            )
-                            row = cur.fetchone()
-                            if row:
-                                node = dict(row)
-                                self._wikilink_node_id_cache[raw_str] = node["id"]
-                                return node
+                        node = self.storage.find_active_node_by_l2_paths(
+                            [abs_cand, str(cand)]
+                        )
+                        if node:
+                            self._wikilink_node_id_cache[raw_str] = node["id"]
+                            return node
                     except Exception:
                         pass
                     break
@@ -591,18 +547,14 @@ class SynapseRetriever:
             # 1. Scan storage nodes with l2_target_path
             if self.storage:
                 try:
-                    with self.storage._lock:
-                        cursor = self.storage._conn.execute(
-                            "SELECT id, uri, l2_target_path FROM synapse_nodes WHERE l2_target_path IS NOT NULL AND status = 'active'"
-                        )
-                        for row in cursor.fetchall():
-                            l2 = row["l2_target_path"]
-                            if l2:
-                                p = Path(l2).expanduser()
-                                if not p.is_absolute() and self.vault_path:
-                                    p = (self.vault_path / p)
-                                if p.is_file():
-                                    files_to_scan.add(p.resolve())
+                    for row in self.storage.list_active_vault_targets():
+                        l2 = row["l2_target_path"]
+                        if l2:
+                            p = Path(l2).expanduser()
+                            if not p.is_absolute() and self.vault_path:
+                                p = (self.vault_path / p)
+                            if p.is_file():
+                                files_to_scan.add(p.resolve())
                 except Exception:
                     pass
 
@@ -1074,19 +1026,10 @@ class SynapseRetriever:
                     loser_ids = {c["loser_id"] for c in conflicts if c.get("loser_id")}
                     if loser_ids:
                         candidates = [cand for cand in candidates if cand.get("id") not in loser_ids]
-                        with self.storage._lock:
-                            for l_id in loser_ids:
-                                try:
-                                    self.storage._conn.execute(
-                                        "UPDATE synapse_nodes SET status = 'superseded' WHERE id = ? AND salience < 0.90",
-                                        (l_id,),
-                                    )
-                                except Exception:
-                                    pass
-                            try:
-                                self.storage._conn.commit()
-                            except Exception:
-                                pass
+                        try:
+                            self.storage.supersede_low_salience_nodes(list(loser_ids))
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

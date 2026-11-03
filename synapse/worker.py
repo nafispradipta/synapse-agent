@@ -371,212 +371,102 @@ class SynapseWorker:
         JSON snapshot, and pruning superseded records from synapse_nodes, synapse_fts,
         synapse_vectors, and synapse_edges to maintain <10ms retrieval speeds.
         """
-        with self.storage._lock:
-            cur = self.storage._conn.cursor()
-            cur.execute("""
-                SELECT id, uri, l0_abstract, l1_overview, l2_target_path, category,
-                       importance, strength, created_at, last_accessed, salience,
-                       confidence, COALESCE(access_count, 0) as access_count
-                FROM synapse_nodes
-                WHERE status = 'superseded'
-            """)
-            rows = [dict(r) for r in cur.fetchall()]
+        rows = self.storage.list_superseded_nodes()
 
-            if len(rows) < min_count:
-                return {
-                    "status": "noop",
-                    "rolled_up_count": len(rows),
-                    "message": f"Superseded count ({len(rows)}) < threshold ({min_count})",
-                }
+        if len(rows) < min_count:
+            return {
+                "status": "noop",
+                "rolled_up_count": len(rows),
+                "message": f"Superseded count ({len(rows)}) < threshold ({min_count})",
+            }
 
-            # 1. Aggregate statistics and categories
-            cat_counts: Dict[str, int] = {}
-            for r in rows:
-                cat = r.get("category") or "general"
-                cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        # 1. Aggregate statistics and categories
+        cat_counts: Dict[str, int] = {}
+        for r in rows:
+            cat = r.get("category") or "general"
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
 
-            now_ts = int(time.time())
-            now_dt = datetime.datetime.now(datetime.timezone.utc)
-            date_str = now_dt.strftime("%Y-%m-%d %H:%M UTC")
+        now_ts = int(time.time())
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        date_str = now_dt.strftime("%Y-%m-%d %H:%M UTC")
 
-            # 2. Extract representative historical highlights
-            theme_samples: Dict[str, List[str]] = {}
-            for r in rows:
-                cat = r.get("category") or "general"
-                if cat not in theme_samples:
-                    theme_samples[cat] = []
-                abstract = (r.get("l0_abstract") or "").strip()
-                if abstract and len(theme_samples[cat]) < 3:
-                    theme_samples[cat].append(abstract[:100])
+        # 2. Extract representative historical highlights
+        theme_samples: Dict[str, List[str]] = {}
+        for r in rows:
+            cat = r.get("category") or "general"
+            if cat not in theme_samples:
+                theme_samples[cat] = []
+            abstract = (r.get("l0_abstract") or "").strip()
+            if abstract and len(theme_samples[cat]) < 3:
+                theme_samples[cat].append(abstract[:100])
 
-            cat_summary_lines = []
-            for cat, count in sorted(cat_counts.items(), key=lambda x: x[1], reverse=True):
-                samples = theme_samples.get(cat, [])
-                sample_text = "; ".join(samples) if samples else "Various superseded entries"
-                cat_summary_lines.append(f"- **{cat.capitalize()}** ({count} nodes): e.g. {sample_text}")
-            cat_breakdown = "\n".join(cat_summary_lines)
+        cat_summary_lines = []
+        for cat, count in sorted(cat_counts.items(), key=lambda x: x[1], reverse=True):
+            samples = theme_samples.get(cat, [])
+            sample_text = "; ".join(samples) if samples else "Various superseded entries"
+            cat_summary_lines.append(f"- **{cat.capitalize()}** ({count} nodes): e.g. {sample_text}")
+        cat_breakdown = "\n".join(cat_summary_lines)
 
-            # Master archive rollup entity definition
-            master_id = "arch-rollup-superseded-master"
-            master_uri = "synapse://archive/superseded_rollup"
-            master_l0 = (
-                f"Consolidated Archive Rollup: {len(rows):,} Superseded Nodes across "
-                f"{', '.join(cat_counts.keys())} domains."
-            )
-            master_l1 = (
-                f"# Archive Superseded Knowledge Rollup ({date_str})\n"
-                f"Total historical superseded entries archived: {len(rows):,}\n\n"
-                f"### Domain Breakdown & Evolution:\n{cat_breakdown}\n\n"
-                f"All {len(rows):,} granular records safely preserved in 'synapse_superseded_archive'. "
-                f"Search indices optimized for sub-10ms active retrieval."
-            )
+        # Master archive rollup entity definition
+        master_id = "arch-rollup-superseded-master"
+        master_uri = "synapse://archive/superseded_rollup"
+        master_l0 = (
+            f"Consolidated Archive Rollup: {len(rows):,} Superseded Nodes across "
+            f"{', '.join(cat_counts.keys())} domains."
+        )
+        master_l1 = (
+            f"# Archive Superseded Knowledge Rollup ({date_str})\n"
+            f"Total historical superseded entries archived: {len(rows):,}\n\n"
+            f"### Domain Breakdown & Evolution:\n{cat_breakdown}\n\n"
+            f"All {len(rows):,} granular records safely preserved in 'synapse_superseded_archive'. "
+            f"Search indices optimized for sub-10ms active retrieval."
+        )
 
-            # 3. Snapshot backup to disk if requested
-            if backup_snapshot:
-                try:
-                    import gzip
-                    base_dir = (
-                        snapshot_dir
-                        or os.path.join(os.path.dirname(self.storage.db_path), "..", "data")
-                    )
-                    os.makedirs(base_dir, exist_ok=True)
-                    snap_path = os.path.join(base_dir, "superseded_archive_snapshot.json.gz")
-                    with gzip.open(snap_path, "wt", encoding="utf-8") as gz:
-                        json.dump(
-                            {
-                                "rollup_timestamp": now_ts,
-                                "rollup_date_wib": date_str,
-                                "total_records": len(rows),
-                                "categories": cat_counts,
-                                "records": rows,
-                            },
-                            gz,
-                            indent=2,
-                        )
-                except Exception:
-                    pass
-
-            # 4. Store rows into synapse_superseded_archive
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS synapse_superseded_archive (
-                    id TEXT PRIMARY KEY,
-                    uri TEXT,
-                    l0_abstract TEXT,
-                    l1_overview TEXT,
-                    l2_target_path TEXT,
-                    category TEXT,
-                    importance REAL,
-                    strength REAL,
-                    created_at INTEGER,
-                    last_accessed INTEGER,
-                    salience REAL,
-                    confidence REAL,
-                    access_count INTEGER,
-                    archived_at INTEGER,
-                    rollup_id TEXT
-                );
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_superseded_archive_cat ON synapse_superseded_archive(category);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_superseded_archive_rollup ON synapse_superseded_archive(rollup_id);")
-
-            for r in rows:
-                cur.execute(
-                    """
-                    INSERT OR REPLACE INTO synapse_superseded_archive (
-                        id, uri, l0_abstract, l1_overview, l2_target_path, category,
-                        importance, strength, created_at, last_accessed, salience,
-                        confidence, access_count, archived_at, rollup_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        r["id"],
-                        r.get("uri"),
-                        r.get("l0_abstract"),
-                        r.get("l1_overview"),
-                        r.get("l2_target_path"),
-                        r.get("category"),
-                        r.get("importance"),
-                        r.get("strength"),
-                        r.get("created_at"),
-                        r.get("last_accessed"),
-                        r.get("salience"),
-                        r.get("confidence"),
-                        r.get("access_count", 0),
-                        now_ts,
-                        master_id,
-                    ),
-                )
-
-            # 5. Insert master rollup entity into synapse_nodes
-            cur.execute(
-                """
-                INSERT INTO synapse_nodes (
-                    id, uri, l0_abstract, l1_overview, l2_target_path, category,
-                    importance, strength, created_at, last_accessed, status,
-                    salience, confidence, access_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    l0_abstract = excluded.l0_abstract,
-                    l1_overview = excluded.l1_overview,
-                    last_accessed = excluded.last_accessed,
-                    status = 'archived',
-                    salience = excluded.salience
-                ON CONFLICT(uri) DO UPDATE SET
-                    l0_abstract = excluded.l0_abstract,
-                    l1_overview = excluded.l1_overview,
-                    last_accessed = excluded.last_accessed,
-                    status = 'archived',
-                    salience = excluded.salience
-                """,
-                (
-                    master_id,
-                    master_uri,
-                    master_l0,
-                    master_l1,
-                    None,
-                    "general",
-                    0.75,
-                    1.0,
-                    now_ts,
-                    now_ts,
-                    "archived",
-                    0.65,
-                    1.0,
-                    0,
-                ),
-            )
-
-            # 6. Explicitly delete edges connected to superseded nodes
-            cur.execute(
-                """
-                DELETE FROM synapse_edges
-                WHERE source_id IN (SELECT id FROM synapse_nodes WHERE status = 'superseded')
-                   OR target_id IN (SELECT id FROM synapse_nodes WHERE status = 'superseded')
-                """
-            )
-            deleted_edges = cur.rowcount
-
-            # 7. Delete superseded nodes from synapse_nodes (triggers FTS and vector cascade)
-            cur.execute("DELETE FROM synapse_nodes WHERE status = 'superseded'")
-            deleted_nodes = cur.rowcount
-
-            # 8. Optimize FTS index
+        # 3. Snapshot backup to disk if requested
+        if backup_snapshot:
             try:
-                cur.execute("INSERT INTO synapse_fts(synapse_fts) VALUES('optimize')")
+                import gzip
+                base_dir = (
+                    snapshot_dir
+                    or os.path.join(os.path.dirname(self.storage.db_path), "..", "data")
+                )
+                os.makedirs(base_dir, exist_ok=True)
+                snap_path = os.path.join(base_dir, "superseded_archive_snapshot.json.gz")
+                with gzip.open(snap_path, "wt", encoding="utf-8") as gz:
+                    json.dump(
+                        {
+                            "rollup_timestamp": now_ts,
+                            "rollup_date_wib": date_str,
+                            "total_records": len(rows),
+                            "categories": cat_counts,
+                            "records": rows,
+                        },
+                        gz,
+                        indent=2,
+                    )
             except Exception:
                 pass
 
-            self.storage._conn.commit()
-            self.storage._invalidate_vector_cache()
+        # 4-8. Archive rows, upsert the master entity, purge superseded data.
+        result = self.storage.commit_superseded_rollup(
+            master={
+                "id": master_id,
+                "uri": master_uri,
+                "l0_abstract": master_l0,
+                "l1_overview": master_l1,
+            },
+            rollup_id=master_id,
+            archived_at=now_ts,
+        )
 
-            return {
-                "status": "success",
-                "rolled_up_count": deleted_nodes,
-                "deleted_edges": deleted_edges,
-                "master_entity_id": master_id,
-                "categories": cat_counts,
-                "archived_at_wib": date_str,
-            }
+        return {
+            "status": "success",
+            "rolled_up_count": result["deleted_nodes"],
+            "deleted_edges": result["deleted_edges"],
+            "master_entity_id": master_id,
+            "categories": cat_counts,
+            "archived_at_wib": date_str,
+        }
 
     def _extract_vault_l0(self, text: str, title_fallback: str) -> str:
         """
@@ -1258,18 +1148,7 @@ class SynapseWorker:
             Dictionary with status, counts, node IDs created/updated, and mental model updates.
         """
         limit = max(1, int(limit))
-        with self.storage._lock:
-            cursor = self.storage._conn.execute(
-                """
-                SELECT * FROM episodes
-                WHERE salience >= ?
-                  AND lessons_learned IS NOT NULL
-                  AND trim(lessons_learned) != ''
-                ORDER BY salience DESC, last_accessed DESC, created_at DESC
-                """,
-                (float(min_salience),),
-            )
-            all_episodes = [dict(row) for row in cursor.fetchall()]
+        all_episodes = self.storage.list_consolidatable_episodes(min_salience)
 
         if not all_episodes:
             return {
@@ -1286,17 +1165,8 @@ class SynapseWorker:
         for ep in all_episodes:
             ep_id = str(ep["id"])
             if not force:
-                with self.storage._lock:
-                    cur = self.storage._conn.execute(
-                        """
-                        SELECT id FROM synapse_nodes
-                        WHERE l2_target_path = ? OR uri LIKE ? OR uri LIKE ?
-                        LIMIT 1
-                        """,
-                        (f"episode:{ep_id}", f"%://%/ep_{ep_id}%", f"%://%/episode_{ep_id}%"),
-                    )
-                    if cur.fetchone() is not None:
-                        continue
+                if self.storage.find_node_by_episode_ref(ep_id) is not None:
+                    continue
 
             candidates.append(ep)
             if len(candidates) >= limit:
@@ -1339,15 +1209,7 @@ class SynapseWorker:
             slug = "-".join(w.lower() for w in words) or f"ep_{ep_id[:8]}"
             target_uri = f"synapse://{category}/{slug}"
 
-            existing_by_path = None
-            with self.storage._lock:
-                cur = self.storage._conn.execute(
-                    "SELECT id, uri FROM synapse_nodes WHERE l2_target_path = ? LIMIT 1",
-                    (f"episode:{ep_id}",),
-                )
-                row = cur.fetchone()
-                if row:
-                    existing_by_path = dict(row)
+            existing_by_path = self.storage.get_node_by_l2_target_path(f"episode:{ep_id}")
 
             if existing_by_path is not None:
                 # Update existing consolidated node
