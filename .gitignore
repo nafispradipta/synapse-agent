@@ -35,5 +35,8 @@ __pycache__/
 dist/
 build/
 
+# Local Analysis Artifacts
+graphify-out/
+
 # Local Environment Secrets
 .env
