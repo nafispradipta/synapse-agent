@@ -53,7 +53,7 @@ class VectorStore:
                         self._invalidate_vector_cache()
                 return success
             except sqlite3.IntegrityError:
-                self._conn.rollback()
+                self._rollback_if_outermost()
                 return False
 
     def get_vector(self, node_id: str) -> Optional[List[float]]:

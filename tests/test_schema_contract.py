@@ -378,3 +378,56 @@ def test_startup_recovers_interrupted_legacy_rebuild(tmp_path):
         ).fetchone() is None
     finally:
         storage.close()
+
+
+def test_recovery_logs_rows_dropped_by_conflict(tmp_path, caplog):
+    import logging
+
+    from synapse.stores.schema import _DDL_SYNAPSE_NODES_REBUILT
+
+    db_file = tmp_path / "legacy-conflict.db"
+    _write_legacy_db(db_file)
+
+    broken = sqlite3.connect(str(db_file))
+    try:
+        broken.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old")
+        broken.execute(_DDL_SYNAPSE_NODES_REBUILT)
+        broken.execute(
+            "INSERT INTO synapse_nodes (id, uri, l0_abstract) "
+            "VALUES ('live-1', 'synapse://legacy/one', 'Live row wins')"
+        )
+        broken.commit()
+    finally:
+        broken.close()
+
+    with caplog.at_level(logging.WARNING, logger="synapse.stores.schema"):
+        storage = SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+    try:
+        assert "legacy-1" in caplog.text
+    finally:
+        storage.close()
+
+
+def test_recovery_restores_post_legacy_columns(tmp_path):
+    from synapse.stores.schema import _DDL_SYNAPSE_NODES_REBUILT
+
+    db_file = tmp_path / "legacy-columns.db"
+    _write_legacy_db(db_file)
+
+    broken = sqlite3.connect(str(db_file))
+    try:
+        broken.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old")
+        broken.execute(_DDL_SYNAPSE_NODES_REBUILT)
+        broken.commit()
+    finally:
+        broken.close()
+
+    storage = SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+    try:
+        columns = {
+            row[1]
+            for row in storage._conn.execute("PRAGMA table_info(synapse_nodes)")
+        }
+        assert {"salience", "confidence", "access_count"} <= columns
+    finally:
+        storage.close()

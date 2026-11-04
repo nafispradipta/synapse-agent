@@ -65,14 +65,19 @@ SPEC_CANONICAL_MAP: Dict[str, str] = {
 # Countable instances whose trailing number identifies the subject rather than
 # a specification attached to it (e.g. 'service 7', not 'ram 7').
 INSTANCE_NOUNS: Set[str] = {
-    "service", "server", "node", "instance", "cluster", "shard", "pod",
+    "service", "server", "instance", "cluster", "shard", "pod",
     "container", "project", "tenant", "account", "environment", "env",
     "host", "vps", "machine", "device", "region", "replica", "worker",
     "thread", "process",
 }
 
+# Synonyms that must resolve to one canonical noun for the identity guard.
+SUBJECT_ALIASES: Dict[str, str] = {
+    "env": "environment",
+}
+
 _SUBJECT_ID_RE = re.compile(
-    r"\b(" + "|".join(sorted(INSTANCE_NOUNS)) + r")\s*[:#]?\s*(\d+)\b",
+    r"\b(" + "|".join(sorted(INSTANCE_NOUNS)) + r")s?\s*[:#]?\s*(\d+)\b",
     re.IGNORECASE,
 )
 
@@ -81,10 +86,12 @@ def extract_subject_ids(text: str) -> Set[str]:
     """Return identifiers such as 'service:7' that name a countable subject."""
     if not text:
         return set()
-    return {
-        f"{m.group(1).lower()}:{m.group(2)}"
-        for m in _SUBJECT_ID_RE.finditer(text)
-    }
+    ids: Set[str] = set()
+    for m in _SUBJECT_ID_RE.finditer(text):
+        noun = m.group(1).lower()
+        noun = SUBJECT_ALIASES.get(noun, noun)
+        ids.add(f"{noun}:{m.group(2)}")
+    return ids
 
 # Units recognized for specifications
 KNOWN_UNITS: Set[str] = {

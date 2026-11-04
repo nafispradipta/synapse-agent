@@ -192,7 +192,7 @@ class GraphStore:
                 self._conn.commit()
                 return True
             except Exception:
-                self._conn.rollback()
+                self._rollback_if_outermost()
                 return False
 
     def update_node(self, node_id: str, **kwargs: Any) -> bool:
@@ -356,7 +356,7 @@ class GraphStore:
                 self._conn.commit()
                 return True
             except sqlite3.IntegrityError:
-                self._conn.rollback()
+                self._rollback_if_outermost()
                 return False
 
     def get_edges(self, node_id: str, direction: str = "both") -> List[Dict[str, Any]]:

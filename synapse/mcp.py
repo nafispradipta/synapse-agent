@@ -278,7 +278,9 @@ def dispatch(req: Any) -> Optional[Dict[str, Any]]:
     req_id = req.get("id")
     is_notification = "id" not in req
     method = req.get("method")
-    params = req.get("params") or {}
+    params = req.get("params")
+    if params is None:
+        params = {}
 
     if not isinstance(method, str) or not method:
         if is_notification:
@@ -319,7 +321,9 @@ def dispatch(req: Any) -> Optional[Dict[str, Any]]:
 
     elif method == "tools/call":
         tool_name = params.get("name", "")
-        tool_args = params.get("arguments") or {}
+        tool_args = params.get("arguments")
+        if tool_args is None:
+            tool_args = {}
         if not isinstance(tool_args, dict):
             if is_notification:
                 return None
@@ -349,8 +353,17 @@ def main():
     _configure_logging()
     _configure_stdio()
     logger.info("Synapse MCP Server started.")
-    for raw_line in sys.stdin:
-        line = raw_line.strip()
+    stdin = getattr(sys.stdin, "buffer", sys.stdin)
+    for raw_line in stdin:
+        if isinstance(raw_line, bytes):
+            try:
+                line = raw_line.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                logger.error("Invalid UTF-8 input line")
+                send_response(_error(None, -32700, "Parse error"))
+                continue
+        else:
+            line = raw_line.strip()
         if not line:
             continue
         try:

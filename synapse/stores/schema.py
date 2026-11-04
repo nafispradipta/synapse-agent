@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Iterator
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -329,9 +330,14 @@ class SchemaMixin:
 
         Rollback happens only at the outermost ``_write`` level so a nested
         failure cannot discard uncommitted DML performed by an outer scope.
+        The nesting depth is tracked per thread because the storage
+        connection is shared across threads.
         """
-        depth = getattr(self, "_write_depth", 0)
-        self._write_depth = depth + 1
+        local = getattr(self, "_write_local", None)
+        if local is None:
+            local = self._write_local = threading.local()
+        depth = getattr(local, "depth", 0)
+        local.depth = depth + 1
         try:
             with self._lock:
                 try:
@@ -341,7 +347,19 @@ class SchemaMixin:
                         self._conn.rollback()
                     raise
         finally:
-            self._write_depth = depth
+            local.depth = depth
+
+    def _rollback_if_outermost(self) -> None:
+        """Roll back for the outermost ``_write`` on this thread.
+
+        Inside a method wrapped in ``_write`` the local depth is 1 at the
+        outermost level, so 1 means "this is the outermost scope"; nested
+        scopes see 2 or more and leave the rollback to the outermost one.
+        """
+        local = getattr(self, "_write_local", None)
+        if local is not None and getattr(local, "depth", 0) > 1:
+            return
+        self._conn.rollback()
 
     def _configure_pragmas(self) -> None:
         """Apply performance and integrity pragmas."""
@@ -436,9 +454,9 @@ class SchemaMixin:
         self._conn.execute("PRAGMA foreign_keys=OFF;")
         if self._conn.in_transaction:
             self._conn.commit()
-        self._conn.execute("BEGIN IMMEDIATE")
         restored = False
         try:
+            self._conn.execute("BEGIN IMMEDIATE")
             if live and live_rows == 0 and old_rows > 0:
                 self._conn.execute("DROP TABLE synapse_nodes;")
                 live = None
@@ -448,6 +466,14 @@ class SchemaMixin:
                 )
                 restored = True
             else:
+                dropped = {
+                    row[0]
+                    for row in self._conn.execute(
+                        "SELECT id FROM _synapse_nodes_old "
+                        "WHERE id IN (SELECT id FROM synapse_nodes) "
+                        "   OR uri IN (SELECT uri FROM synapse_nodes);"
+                    )
+                }
                 live_cols = {
                     row[1]
                     for row in self._conn.execute("PRAGMA table_info(synapse_nodes);")
@@ -470,6 +496,12 @@ class SchemaMixin:
                     f"INSERT OR IGNORE INTO synapse_nodes ({columns}) "
                     f"SELECT {columns} FROM _synapse_nodes_old;"
                 )
+                if dropped:
+                    logger.warning(
+                        "Recovery dropped %d conflicting superseded row(s) (ids=%s)",
+                        len(dropped),
+                        ", ".join(sorted(dropped)),
+                    )
                 self._conn.execute("DROP TABLE _synapse_nodes_old;")
             self._conn.commit()
         except BaseException:

@@ -155,3 +155,50 @@ def test_import_has_no_filesystem_side_effects(tmp_path):
     assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
     assert [p for p in home.rglob("*") if p.is_file()] == []
     assert [p for p in work.rglob("*") if p.is_file()] == []
+
+
+def test_invalid_utf8_bytes_get_parse_error_not_crash(tmp_path):
+    env = _env(tmp_path)
+    payload = (
+        b"\xff\xfe not valid utf-8\n"
+        + json.dumps(_request(9, "ping")).encode("utf-8")
+        + b"\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "synapse.mcp"],
+        input=payload,
+        capture_output=True,
+        cwd=str(tmp_path),
+        env=env,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+    responses = [
+        json.loads(line)
+        for line in completed.stdout.decode("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert responses[0]["error"]["code"] == -32700
+    assert responses[0]["id"] is None
+    assert responses[-1]["result"] == {}
+
+
+def test_params_array_is_invalid_params(tmp_path):
+    completed, responses = _run(tmp_path, [_request(11, "initialize", [])])
+    assert responses[0]["error"]["code"] == -32602
+
+
+def test_error_code_matrix(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "bogus/method"),
+            {"jsonrpc": "2.0", "method": "bogus/method"},
+            _call(3, "synapse_retain", []),
+            _request(4, "ping"),
+        ],
+    )
+    assert responses[0]["error"]["code"] == -32601
+    assert [r["id"] for r in responses] == [1, 3, 4]
+    assert responses[1]["error"]["code"] == -32602
+    assert responses[2]["result"] == {}

@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Legacy Node Migration Is Atomic and Recoverable:** The `synapse_nodes` rebuild now runs as one transaction and startup recovers databases left mid-rename by older releases (rows restored from `_synapse_nodes_old`) instead of exposing an empty table.
 - **Prune Keeps Superseded Nodes Until Archival:** `prune_exhausted_nodes` now only deletes active rows, so superseded records reach the superseded-archive rollup instead of being lost.
 - **MCP Server Reports Real Failures:** The stdio server forces UTF-8, answers malformed input with `-32700`/`-32600`/`-32602`/`-32601`/`-32603`, no longer crashes on array payloads or non-ASCII output, ignores notifications as JSON-RPC requires, reports `isError` when a write fails or storage is unavailable, exposes the package version and the full category enum (`general` included), and creates no database or log directory at import time (adapter and logging are lazy). `tests/test_mcp_protocol.py` covers the protocol end to end.
+- **Write Depth Tracking Is Thread-Local:** The shared `_write` rollback counter is now per thread, so a background maintenance thread cannot disable rollback for every later write on the connection; failed writes in any thread roll back at their own outermost level. Recovery of an interrupted legacy migration now logs the ids of superseded rows it must drop when they conflict with live rows.
 
 ## [1.0.4] - 2026-11-02
 

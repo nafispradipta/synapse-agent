@@ -5,7 +5,7 @@
 ## Commands
 
 - Install: `pip install -e ".[dev]"`
-- Full suite: `python -m pytest` (318 tests, ~8s). `pytest` is not always on PATH, so use `python -m pytest`.
+- Full suite: `python -m pytest` (340+ tests, ~9s). `pytest` is not always on PATH, so use `python -m pytest`.
 - Single test: `python -m pytest tests/test_schema_contract.py::test_schema_creates_expected_core_tables -q`
 - Smoke test: `python examples/quickstart.py` (in-memory, no API key needed). It has no `sys.path` bootstrap, so the repo root must be on the path first: `$env:PYTHONPATH="."` in PowerShell or `PYTHONPATH=.`, unless you already ran `pip install -e .`.
 - MCP server: `python -m synapse.mcp` (or `python scripts/mcp_server.py`)
@@ -41,5 +41,5 @@
 
 - English-only code/docs, no emojis (`CONTRIBUTING.md`).
 - Conventional commits (`feat:`, `fix:`, `refactor:`), atomic changes.
-- Record user-visible changes in `CHANGELOG.md` and bump `pyproject.toml` version. Note `synapse/mcp.py` hardcodes `serverInfo.version` (`1.0.0`) and has drifted from the package version.
+- Record user-visible changes in `CHANGELOG.md` and bump `pyproject.toml` version. `synapse/mcp.py` pins its `SERVER_VERSION` to the package version and `tests/test_mcp_protocol.py` reads the two from `pyproject.toml` so they cannot drift apart.
 - `graphify-out/` and `data/`/`logs/` are local, gitignored artifacts; do not commit or treat them as source.

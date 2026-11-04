@@ -741,3 +741,55 @@ def test_same_service_spec_change_still_supersedes() -> None:
         assert len(adapter.storage.list_nodes(status="superseded")) == 1
     finally:
         adapter.storage.close()
+
+
+def test_node_runtime_version_upgrade_conflicts() -> None:
+    adapter = SynapseAdapter({"db_path": ":memory:"})
+    try:
+        adapter.retain(
+            "Node 18 is the approved runtime.",
+            category="architecture",
+            salience=0.8,
+            created_at=1000,
+        )
+        adapter.retain(
+            "Node 20 is the approved runtime.",
+            category="architecture",
+            salience=0.85,
+            created_at=2000,
+        )
+        superseded = adapter.storage.list_nodes(status="superseded")
+        assert len(superseded) == 1
+        assert "18" in superseded[0]["l0_abstract"]
+    finally:
+        adapter.storage.close()
+
+
+def test_equivalent_subject_aliases_still_conflict() -> None:
+    adapter = SynapseAdapter({"db_path": ":memory:"})
+    try:
+        adapter.retain(
+            "environment 3 runs port 8080",
+            category="architecture",
+            salience=0.8,
+            created_at=1000,
+        )
+        adapter.retain(
+            "env 3 runs port 9090",
+            category="architecture",
+            salience=0.85,
+            created_at=2000,
+        )
+        superseded = adapter.storage.list_nodes(status="superseded")
+        assert len(superseded) == 1
+        assert "8080" in superseded[0]["l0_abstract"]
+    finally:
+        adapter.storage.close()
+
+
+def test_subject_ids_accept_plural_nouns() -> None:
+    from synapse.contradiction_resolver import extract_subject_ids
+
+    assert extract_subject_ids("Services 7 runs on port 8007") == {"service:7"}
+    assert extract_subject_ids("clusters 6 and cluster 7 are identical") == {"cluster:6", "cluster:7"}
+    assert extract_subject_ids("envs 2 and env 3 are stable") == {"environment:2", "environment:3"}

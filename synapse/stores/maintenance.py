@@ -23,7 +23,9 @@ class MaintenanceStore:
             "vacuum": "ok",
             "timestamp": int(time.time()),
         }
-        with self._write():
+        # VACUUM and wal_checkpoint cannot run inside a transaction, so this
+        # path deliberately avoids the _write wrapper.
+        with self._lock:
             if not self.is_memory:
                 try:
                     chk = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
