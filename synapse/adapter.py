@@ -137,7 +137,7 @@ class SynapseAdapter(BaseMemoryAdapter):
             self.observation_engine = ObservationEngine(storage=self.storage)
             research_dir = (
                 self.config.get("research_dir")
-                or (str(self.vault_path / "research" / "auto_harvest") if self.vault_path else str(Path("./data/research/auto_harvest").resolve()))
+                or (str(self.vault_path / "research" / "auto_harvest") if self.vault_path else os.environ.get("SYNAPSE_RESEARCH_DIR") or str(Path.home() / ".synapse" / "research" / "auto_harvest"))
             )
             self.harvester = SynapseWebHarvester(
                 storage=self.storage,
@@ -1032,7 +1032,7 @@ class SynapseAdapter(BaseMemoryAdapter):
         """Return configured Web Harvester instance with Vault integration."""
         research_dir = (
             self.config.get("research_dir")
-            or (str(self.vault_path / "research" / "auto_harvest") if self.vault_path else str(Path("./data/research/auto_harvest").resolve()))
+            or (str(self.vault_path / "research" / "auto_harvest") if self.vault_path else os.environ.get("SYNAPSE_RESEARCH_DIR") or str(Path.home() / ".synapse" / "research" / "auto_harvest"))
         )
         harvester_config = {
             "storage": self.storage,
