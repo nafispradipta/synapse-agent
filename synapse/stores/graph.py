@@ -441,7 +441,7 @@ class GraphStore:
         with self._write():
             cursor = self._conn.execute(
                 """
-                SELECT source_id, target_id, relation, weight, last_fired
+                SELECT source_id, target_id, relation, COALESCE(weight, 0.5), COALESCE(last_fired, 0)
                 FROM synapse_edges
                 WHERE (last_fired IS NULL OR last_fired < ?)
                   AND source_id NOT IN (SELECT id FROM synapse_nodes WHERE salience >= 0.90)
