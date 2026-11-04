@@ -136,6 +136,7 @@ _DDL_SYNAPSE_VECTORS = """
         vector_json TEXT NOT NULL,
         dim INTEGER NOT NULL,
         updated_at INTEGER,
+        model TEXT,
         FOREIGN KEY(id) REFERENCES synapse_nodes(id) ON DELETE CASCADE
     );
 """
@@ -596,6 +597,10 @@ class SchemaMixin:
         """Vectors, cache version metadata, and version-bump triggers."""
         # 8. Synapse Vectors table
         cursor.execute(_DDL_SYNAPSE_VECTORS)
+        cursor.execute("PRAGMA table_info(synapse_vectors);")
+        vector_cols = {row[1] for row in cursor.fetchall()}
+        if "model" not in vector_cols:
+            cursor.execute("ALTER TABLE synapse_vectors ADD COLUMN model TEXT;")
 
         for statement in _INDEXES_SYNAPSE_VECTORS:
             cursor.execute(statement)

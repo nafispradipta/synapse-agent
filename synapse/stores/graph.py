@@ -95,17 +95,21 @@ class GraphStore:
                     vec = vectorize_text(text_to_embed, dim=384)
 
                 if vec:
+                    model = None
+                    if self.embedder is not None:
+                        model = getattr(self.embedder, "model_name", None)
                     vec_json = json.dumps(vec)
                     self._conn.execute(
                         """
-                        INSERT INTO synapse_vectors (id, vector_json, dim, updated_at)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO synapse_vectors (id, vector_json, dim, updated_at, model)
+                        VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             vector_json = excluded.vector_json,
                             dim = excluded.dim,
-                            updated_at = excluded.updated_at
+                            updated_at = excluded.updated_at,
+                            model = excluded.model
                         """,
-                        (uid, vec_json, len(vec), now),
+                        (uid, vec_json, len(vec), now, model),
                     )
             except Exception:
                 pass
@@ -249,7 +253,41 @@ class GraphStore:
             self._conn.commit()
             if "status" in updates:
                 self._invalidate_vector_cache()
+            if {"l0_abstract", "l1_overview"} & set(updates):
+                self._refresh_or_drop_vector(node_id)
             return cursor.rowcount > 0
+
+    def _refresh_or_drop_vector(self, node_id: str) -> None:
+        """Re-embed when text changed so recall never ranks stale vectors.
+
+        Runs after the UPDATE commits; the vector may briefly be stale, which
+        is bounded and self-heals on the next write or cache rebuild. Falls
+        back to deleting the row so ``list_nodes_missing_vectors`` can backfill.
+        """
+        node = self.get_node(node_id, touch=False)
+        target_id = str(node["id"]) if node else node_id
+        self._conn.execute(
+            "DELETE FROM synapse_vectors WHERE id = ?",
+            (target_id,),
+        )
+        self._conn.commit()
+
+        embedder = self._get_embedder()
+        if embedder is None or not node:
+            self._invalidate_vector_cache()
+            return
+
+        text_to_embed = f"{node.get('l0_abstract') or ''} {node.get('l1_overview') or ''}".strip()
+        vector = None
+        model = getattr(embedder, "model_name", None)
+        try:
+            vector = embedder.embed(text_to_embed)
+        except Exception:
+            vector = None
+        if vector:
+            self.upsert_vector(target_id, vector, model=model)
+        else:
+            self._invalidate_vector_cache()
 
     def delete_node(self, node_id: str) -> bool:
         """

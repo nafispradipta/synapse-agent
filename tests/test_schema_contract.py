@@ -78,7 +78,7 @@ EXPECTED_COLUMNS = {
         "id", "title", "situation", "action_taken", "outcome", "lessons_learned",
         "salience", "confidence", "created_at", "last_accessed", "tags",
     ],
-    "synapse_vectors": ["id", "vector_json", "dim", "updated_at"],
+    "synapse_vectors": ["id", "vector_json", "dim", "updated_at", "model"],
     "synapse_mental_models": [
         "id", "name", "source_query", "content", "structured_content",
         "trigger_mode", "tags", "max_tokens", "last_refreshed_at",

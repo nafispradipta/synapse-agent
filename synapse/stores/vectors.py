@@ -14,7 +14,12 @@ from synapse.stores.constants import _NUMPY_AVAILABLE, np
 class VectorStore:
     """Embeddings, the in-memory matrix cache, and cosine search."""
 
-    def upsert_vector(self, node_id: str, vector: List[float]) -> bool:
+    def upsert_vector(
+        self,
+        node_id: str,
+        vector: List[float],
+        model: Optional[str] = None,
+    ) -> bool:
         """
         Store or update the embedding vector for a synapse node.
         Returns True on success, False if node does not exist or vector is empty.
@@ -29,14 +34,15 @@ class VectorStore:
                 dim = len(vector)
                 cursor = self._conn.execute(
                     """
-                    INSERT INTO synapse_vectors (id, vector_json, dim, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO synapse_vectors (id, vector_json, dim, updated_at, model)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         vector_json = excluded.vector_json,
                         dim = excluded.dim,
-                        updated_at = excluded.updated_at
+                        updated_at = excluded.updated_at,
+                        model = excluded.model
                     """,
-                    (node_id, vec_json, dim, now),
+                    (node_id, vec_json, dim, now, model),
                 )
                 self._conn.commit()
                 success = cursor.rowcount > 0
