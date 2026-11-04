@@ -244,7 +244,9 @@ class SynapseWebHarvester:
                 importance=0.6,
                 strength=0.1,
                 node_id=db_res["id"],
-                status="active",
+                # Tier 4 research enters memory as flagged so unvetted web
+                # content never appears in recall until promoted.
+                status="flagged",
             )
         except Exception as e:
             logger.debug("Auto-retaining harvested research into nodes/vectors notice: %s", e)
