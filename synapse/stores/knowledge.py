@@ -25,7 +25,7 @@ class KnowledgeStore:
         """Create or update a consolidated mental model."""
         now = int(time.time())
         tags_json = json.dumps(tags or [])
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT content, history FROM synapse_mental_models WHERE id = ?",
                 (model_id,),
@@ -92,7 +92,7 @@ class KnowledgeStore:
 
     def get_mental_model(self, model_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a mental model by ID."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT * FROM synapse_mental_models WHERE id = ?",
                 (model_id,),
@@ -109,7 +109,7 @@ class KnowledgeStore:
 
     def list_mental_models(self) -> List[Dict[str, Any]]:
         """List all mental models."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT id, name, source_query, content, trigger_mode, tags, last_refreshed_at, created_at FROM synapse_mental_models ORDER BY name ASC"
             )
@@ -138,7 +138,7 @@ class KnowledgeStore:
         If a matching pattern already exists, increment proof_count and append quote.
         """
         now = int(time.time())
-        with self._lock:
+        with self._write():
             if observation_id:
                 cursor = self._conn.execute(
                     "SELECT * FROM synapse_observations WHERE id = ?",
@@ -219,7 +219,7 @@ class KnowledgeStore:
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Retrieve active observations ordered by proof_count descending."""
-        with self._lock:
+        with self._write():
             if category:
                 cursor = self._conn.execute(
                     """
@@ -263,7 +263,7 @@ class KnowledgeStore:
         """Record sandboxed Tier 4 external research into synapse_external_research."""
         research_id = f"res:{uuid.uuid4().hex[:10]}"
         now = int(time.time())
-        with self._lock:
+        with self._write():
             self._conn.execute(
                 """
                 INSERT INTO synapse_external_research (
@@ -292,7 +292,7 @@ class KnowledgeStore:
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """List sandboxed external research records."""
-        with self._lock:
+        with self._write():
             query = "SELECT * FROM synapse_external_research WHERE 1=1"
             params: List[Any] = []
             if topic:
@@ -317,7 +317,7 @@ class KnowledgeStore:
         Promotion Gate: Elevate a quarantined Tier 4 research item to Tier 1 Mental Model
         or Tier 2 Observation upon user confirmation or high usage count.
         """
-        with self._lock:
+        with self._write():
             cur = self._conn.execute(
                 "SELECT * FROM synapse_external_research WHERE id = ?", (research_id,)
             )

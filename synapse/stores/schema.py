@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +319,26 @@ _TRIGGERS_VECTOR_VERSION = (
 
 class SchemaMixin:
     """Creates the schema and migrates databases written by older releases."""
+
+    @contextmanager
+    def _write(self) -> Iterator[Any]:
+        """Run a write block under the lock and roll back if it raises.
+
+        Rollback happens only at the outermost ``_write`` level so a nested
+        failure cannot discard uncommitted DML performed by an outer scope.
+        """
+        depth = getattr(self, "_write_depth", 0)
+        self._write_depth = depth + 1
+        try:
+            with self._lock:
+                try:
+                    yield self._conn
+                except BaseException:
+                    if depth == 0:
+                        self._conn.rollback()
+                    raise
+        finally:
+            self._write_depth = depth
 
     def _configure_pragmas(self) -> None:
         """Apply performance and integrity pragmas."""

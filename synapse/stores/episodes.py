@@ -39,7 +39,7 @@ class EpisodeStore:
             else:
                 tags_str = str(tags).strip()
 
-        with self._lock:
+        with self._write():
             self._conn.execute(
                 """
                 INSERT INTO episodes (
@@ -69,7 +69,7 @@ class EpisodeStore:
         Retrieve an episodic memory by ID.
         Optionally updates last_accessed timestamp when touch=True.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT * FROM episodes WHERE id = ?",
                 (episode_id,),
@@ -131,7 +131,7 @@ class EpisodeStore:
         values = list(updates.values())
         values.append(episode_id)
 
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 f"UPDATE episodes SET {set_clause} WHERE id = ?",
                 values,
@@ -145,7 +145,7 @@ class EpisodeStore:
         Triggers cascade removal from episodes_fts.
         Returns True if deleted, False otherwise.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "DELETE FROM episodes WHERE id = ?",
                 (episode_id,),
@@ -161,7 +161,7 @@ class EpisodeStore:
         """
         List episodes ordered by salience and recency.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT * FROM episodes
@@ -190,7 +190,7 @@ class EpisodeStore:
         if not formatted_query:
             return []
 
-        with self._lock:
+        with self._write():
             try:
                 cursor = self._conn.execute(
                     """
@@ -235,7 +235,7 @@ class EpisodeStore:
 
     def list_consolidatable_episodes(self, min_salience: float = 0.5) -> List[Dict[str, Any]]:
         """Episodes that carry usable lessons and meet the salience floor."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT * FROM episodes

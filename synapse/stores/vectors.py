@@ -22,7 +22,7 @@ class VectorStore:
         if not vector or not node_id:
             return False
 
-        with self._lock:
+        with self._write():
             try:
                 now = int(time.time())
                 vec_json = json.dumps(vector)
@@ -53,6 +53,7 @@ class VectorStore:
                         self._invalidate_vector_cache()
                 return success
             except sqlite3.IntegrityError:
+                self._conn.rollback()
                 return False
 
     def get_vector(self, node_id: str) -> Optional[List[float]]:
@@ -60,7 +61,7 @@ class VectorStore:
         Retrieve the embedding vector for a node ID.
         Returns None if not found or invalid.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT vector_json FROM synapse_vectors WHERE id = ?",
                 (node_id,),
@@ -85,21 +86,21 @@ class VectorStore:
     @property
     def vector_matrix(self) -> Optional[Any]:
         """Contiguous float32 numpy matrix cache for active vectors."""
-        with self._lock:
+        with self._write():
             self._ensure_vector_matrix_cache()
             return self._vector_matrix
 
     @property
     def raw_vector_matrix(self) -> Optional[Any]:
         """Contiguous float32 raw (unnormalized) numpy matrix cache for active vectors."""
-        with self._lock:
+        with self._write():
             self._ensure_vector_matrix_cache()
             return self._raw_vector_matrix
 
     @property
     def vector_node_ids(self) -> List[str]:
         """Node IDs corresponding to the rows of vector_matrix."""
-        with self._lock:
+        with self._write():
             self._ensure_vector_matrix_cache()
             return list(self._vector_node_ids)
 
@@ -124,7 +125,7 @@ class VectorStore:
         If normalized=True, returns unit-normalized matrix for dot product search.
         If normalized=False, returns raw stored vectors.
         """
-        with self._lock:
+        with self._write():
             self._ensure_vector_matrix_cache()
             mat = self._vector_matrix if normalized else self._raw_vector_matrix
             return mat, list(self._vector_node_ids)
@@ -149,12 +150,12 @@ class VectorStore:
 
     def invalidate_vector_cache(self) -> None:
         """Explicitly invalidate the vector matrix cache in a thread-safe manner."""
-        with self._lock:
+        with self._write():
             self._invalidate_vector_cache()
 
     def rebuild_vector_cache(self) -> Tuple[Optional[Any], List[str]]:
         """Explicitly rebuild the vector matrix cache and return (matrix, node_ids)."""
-        with self._lock:
+        with self._write():
             self._build_vector_matrix_cache()
             return self._vector_matrix, list(self._vector_node_ids)
 
@@ -343,7 +344,7 @@ class VectorStore:
         q_unit = np.ascontiguousarray(q / q_norm, dtype=np.float32)
         q_dim = len(q)
 
-        with self._lock:
+        with self._write():
             self._ensure_vector_matrix_cache()
 
             if self._vector_matrix is None or len(self._vector_node_ids) == 0:
@@ -390,7 +391,7 @@ class VectorStore:
 
         scored: List[Tuple[str, float]] = []
 
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT v.id, v.vector_json
@@ -426,7 +427,7 @@ class VectorStore:
 
     def list_nodes_missing_vectors(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Active nodes that do not have an embedding vector stored yet."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT n.id, n.l0_abstract, n.l1_overview

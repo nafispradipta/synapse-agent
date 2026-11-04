@@ -23,7 +23,7 @@ class MaintenanceStore:
             "vacuum": "ok",
             "timestamp": int(time.time()),
         }
-        with self._lock:
+        with self._write():
             if not self.is_memory:
                 try:
                     chk = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
@@ -50,7 +50,7 @@ class MaintenanceStore:
         salience 0.90, or any preference/decision node, is pinned to full
         strength and confidence so the decay pass cannot starve it.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 UPDATE synapse_nodes
@@ -73,7 +73,7 @@ class MaintenanceStore:
         """
         cutoff_ts = int(time.time()) - idle_days * 86400
         cutoff_iso = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat()
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 UPDATE synapse_nodes
@@ -93,7 +93,7 @@ class MaintenanceStore:
 
     def prune_exhausted_nodes(self) -> int:
         """Delete nodes with salience < 0.25 and strength at the floor."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 DELETE FROM synapse_nodes
@@ -108,7 +108,7 @@ class MaintenanceStore:
     def prune_weak_edges(self, min_weight: float = 0.15,
                          protected_salience: float = 0.90) -> int:
         """Delete edges below ``min_weight`` not anchored to a high-salience node."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 DELETE FROM synapse_edges
@@ -146,7 +146,7 @@ class MaintenanceStore:
         """
         now = int(time.time())
         created = created_at if created_at is not None else now
-        with self._lock:
+        with self._write():
             self._conn.execute(
                 """
                 INSERT INTO synapse_nodes (
@@ -179,7 +179,7 @@ class MaintenanceStore:
     def optimize_fts_indices(self) -> Dict[str, bool]:
         """Run FTS5 ``optimize`` on the node and episode indices (best effort)."""
         results: Dict[str, bool] = {}
-        with self._lock:
+        with self._write():
             for table in ("synapse_fts", "episodes_fts"):
                 try:
                     self._conn.execute(f"INSERT INTO {table}({table}) VALUES('optimize')")
@@ -211,7 +211,7 @@ class MaintenanceStore:
         if not ids:
             return 0
         updated = 0
-        with self._lock:
+        with self._write():
             for node_id in ids:
                 cursor = self._conn.execute(
                     "UPDATE synapse_nodes SET status = 'superseded' "
@@ -239,7 +239,7 @@ class MaintenanceStore:
 
     def list_superseded_nodes(self) -> List[Dict[str, Any]]:
         """All nodes currently marked superseded, with the rollup column set."""
-        with self._lock:
+        with self._write():
             return self._select_superseded_rows()
 
     def commit_superseded_rollup(
@@ -257,7 +257,7 @@ class MaintenanceStore:
         """
         timestamp = int(archived_at) if archived_at is not None else int(time.time())
         archived_rows = 0
-        with self._lock:
+        with self._write():
             rows = self._select_superseded_rows()
             cur = self._conn.cursor()
             cur.execute(

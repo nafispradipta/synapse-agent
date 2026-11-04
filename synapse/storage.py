@@ -72,8 +72,12 @@ class SynapseStorage(
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
 
-        self._configure_pragmas()
-        self._init_schema()
+        try:
+            self._configure_pragmas()
+            self._init_schema()
+        except BaseException:
+            self._conn.close()
+            raise
 
         # Embedder & Vectorizer configuration
         self.embedder = embedder

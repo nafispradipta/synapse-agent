@@ -52,7 +52,7 @@ class GraphStore:
         now = int(time.time())
         created_ts = int(created_at) if created_at is not None else now
 
-        with self._lock:
+        with self._write():
             self._conn.execute(
                 """
                 INSERT INTO synapse_nodes (
@@ -119,7 +119,7 @@ class GraphStore:
         Retrieve a node by its ID or URI.
         Optionally updates last_accessed timestamp when touch=True.
         """
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT * FROM synapse_nodes WHERE id = ? OR uri = ?",
                 (node_id_or_uri, node_id_or_uri),
@@ -164,7 +164,7 @@ class GraphStore:
         Hebbian Reinforcement hook: records node access/recall, increments access_count,
         strengthens node salience and strength, and optionally reinforces connected edges.
         """
-        with self._lock:
+        with self._write():
             now = int(time.time())
             try:
                 self._conn.execute(
@@ -192,6 +192,7 @@ class GraphStore:
                 self._conn.commit()
                 return True
             except Exception:
+                self._conn.rollback()
                 return False
 
     def update_node(self, node_id: str, **kwargs: Any) -> bool:
@@ -240,7 +241,7 @@ class GraphStore:
         values = list(updates.values())
         values.extend([node_id, node_id])
 
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 f"UPDATE synapse_nodes SET {set_clause} WHERE id = ? OR uri = ?",
                 values,
@@ -256,7 +257,7 @@ class GraphStore:
         Triggers cascade deletion of associated edges and FTS index entries.
         Returns True if deleted, False otherwise.
         """
-        with self._lock:
+        with self._write():
             if self._incremental_cache and self._vector_cache_valid:
                 row = self._conn.execute(
                     "SELECT id FROM synapse_nodes WHERE id = ? OR uri = ?", (node_id, node_id)
@@ -322,7 +323,7 @@ class GraphStore:
         """
         params.append(max(1, int(limit)))
 
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
@@ -339,7 +340,7 @@ class GraphStore:
         Returns True on success, False if foreign key constraint fails.
         """
         now = int(time.time())
-        with self._lock:
+        with self._write():
             try:
                 self._conn.execute(
                     """
@@ -355,6 +356,7 @@ class GraphStore:
                 self._conn.commit()
                 return True
             except sqlite3.IntegrityError:
+                self._conn.rollback()
                 return False
 
     def get_edges(self, node_id: str, direction: str = "both") -> List[Dict[str, Any]]:
@@ -365,7 +367,7 @@ class GraphStore:
         if direction not in ("out", "in", "both"):
             raise ValueError(f"Invalid direction '{direction}'. Must be 'out', 'in', or 'both'.")
 
-        with self._lock:
+        with self._write():
             if direction == "out":
                 cursor = self._conn.execute(
                     "SELECT * FROM synapse_edges WHERE source_id = ? ORDER BY weight DESC",
@@ -398,7 +400,7 @@ class GraphStore:
         cutoff_seconds = int(idle_days_threshold * 86400)
         cutoff_ts = now - cutoff_seconds
 
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT source_id, target_id, relation, weight, last_fired
@@ -460,7 +462,7 @@ class GraphStore:
         if not formatted_query:
             return []
 
-        with self._lock:
+        with self._write():
             try:
                 cursor = self._conn.execute(
                     """
@@ -513,7 +515,7 @@ class GraphStore:
         stem: str,
     ) -> Optional[Dict[str, Any]]:
         """Resolve a wikilink string to an active node via uri or vault path."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT * FROM synapse_nodes
@@ -557,7 +559,7 @@ class GraphStore:
         if not candidates:
             return None
         clause = " OR ".join("l2_target_path = ?" for _ in candidates)
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 f"SELECT * FROM synapse_nodes WHERE ({clause}) AND status = 'active' LIMIT 1",
                 tuple(candidates),
@@ -567,7 +569,7 @@ class GraphStore:
 
     def list_active_vault_targets(self) -> List[Dict[str, Any]]:
         """Active nodes that carry a vault path, for wikilink index building."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT id, uri, l2_target_path FROM synapse_nodes
@@ -579,7 +581,7 @@ class GraphStore:
     def find_node_by_episode_ref(self, episode_id: str) -> Optional[Dict[str, Any]]:
         """Find a node previously consolidated from the given episode."""
         episode_id = str(episode_id)
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 """
                 SELECT id, uri FROM synapse_nodes
@@ -597,7 +599,7 @@ class GraphStore:
 
     def get_node_by_l2_target_path(self, path: str) -> Optional[Dict[str, Any]]:
         """Look up a node by its exact l2_target_path."""
-        with self._lock:
+        with self._write():
             cursor = self._conn.execute(
                 "SELECT id, uri FROM synapse_nodes WHERE l2_target_path = ? LIMIT 1",
                 (str(path),),
