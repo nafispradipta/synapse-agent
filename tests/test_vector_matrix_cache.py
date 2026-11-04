@@ -459,3 +459,33 @@ class TestEdgeCasesAndThreadSafety:
             concurrent.futures.wait(readers + writers, timeout=10)
 
         assert len(errors) == 0, f"Encountered thread safety errors: {errors}"
+
+
+def test_incremental_cache_avoids_rebuild(tmp_path, monkeypatch):
+    """With incremental_cache enabled, writes must not force matrix rebuilds."""
+    storage = SynapseStorage(":memory:")
+    try:
+        storage.incremental_cache = True
+        calls = {"n": 0}
+        original = storage._build_vector_matrix_cache
+
+        def counted() -> None:
+            calls["n"] += 1
+            return original()
+
+        monkeypatch.setattr(storage, "_build_vector_matrix_cache", counted)
+
+        ids = [
+            storage.add_node(uri=f"synapse://incr/{i}", l0_abstract=f"node {i}")
+            for i in range(3)
+        ]
+        storage.search_vectors([0.1] * 384, top_k=2)
+        baseline = calls["n"]
+
+        for i, nid in enumerate(ids):
+            storage.upsert_vector(nid, [float(i % 3) + 0.1] * 384)
+            storage.search_vectors([0.1] * 384, top_k=2)
+
+        assert calls["n"] == baseline, f"incremental writes triggered rebuilds: {calls['n']}"
+    finally:
+        storage.close()

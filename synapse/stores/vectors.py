@@ -275,12 +275,12 @@ class VectorStore:
                     self._raw_vector_matrix[idx] = vec_raw
             else:
                 self._invalidate_vector_cache()
+                return
         else:
             if self._vector_matrix is None or len(self._vector_node_ids) == 0:
                 self._vector_matrix = np.ascontiguousarray([vec_norm], dtype=np.float32)
                 self._raw_vector_matrix = np.ascontiguousarray([vec_raw], dtype=np.float32)
                 self._vector_node_ids = [node_id]
-                self._vector_cache_valid = True
             elif self._vector_matrix.shape[1] == len(vec_raw):
                 self._vector_matrix = np.ascontiguousarray(
                     np.vstack([self._vector_matrix, vec_norm.reshape(1, -1)]), dtype=np.float32
@@ -290,9 +290,14 @@ class VectorStore:
                         np.vstack([self._raw_vector_matrix, vec_raw.reshape(1, -1)]), dtype=np.float32
                     )
                 self._vector_node_ids.append(node_id)
-                self._vector_cache_valid = True
             else:
                 self._invalidate_vector_cache()
+                return
+
+        # Keep the incremental matrix warm and aligned with the DB-side
+        # version counter so _ensure_vector_matrix_cache does not rebuild.
+        self._vector_cache_valid = True
+        self._cached_vector_version = self._get_vector_data_version()
 
     def _incremental_delete(self, node_id: str) -> None:
         """Incrementally remove a node from the matrix cache."""
@@ -314,6 +319,9 @@ class VectorStore:
                 self._vector_matrix = np.empty((0, 0), dtype=np.float32)
                 self._raw_vector_matrix = np.empty((0, 0), dtype=np.float32)
                 self._vector_node_ids = []
+
+        self._vector_cache_valid = True
+        self._cached_vector_version = self._get_vector_data_version()
 
     def search_vectors(
         self,
