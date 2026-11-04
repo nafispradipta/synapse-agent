@@ -14,23 +14,39 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Setup logging
-log_dir = Path(os.environ.get("SYNAPSE_LOGS_DIR") or (Path.home() / ".synapse" / "logs")).resolve()
-log_dir.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    filename=str(log_dir / "mcp_server.log"),
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+# Setup logging (configured only when the server starts, never at import time)
 logger = logging.getLogger("synapse.mcp")
 
-from synapse.adapter import SynapseAdapter
+SERVER_VERSION = "1.0.5"
 
-# Resolve database path: env var -> local project ./data/synapse.db -> global ~/.synapse/synapse.db
-local_db = Path("./data/synapse.db").resolve()
-default_db = str(local_db) if local_db.exists() else str((Path.home() / ".synapse" / "synapse.db").resolve())
-DB_PATH = os.environ.get("SYNAPSE_DB_PATH", default_db)
-adapter = SynapseAdapter({"db_path": DB_PATH})
+from synapse.adapter import SynapseAdapter
+from synapse.stores.constants import VALID_CATEGORIES
+
+_adapter: Optional[SynapseAdapter] = None
+
+
+def _resolve_db_path() -> str:
+    local_db = Path("./data/synapse.db").resolve()
+    default_db = str(local_db) if local_db.exists() else str((Path.home() / ".synapse" / "synapse.db").resolve())
+    return os.environ.get("SYNAPSE_DB_PATH", default_db)
+
+
+def get_adapter() -> SynapseAdapter:
+    """Lazily construct the shared adapter so importing this module is side-effect free."""
+    global _adapter
+    if _adapter is None:
+        _adapter = SynapseAdapter({"db_path": _resolve_db_path()})
+    return _adapter
+
+
+def _configure_logging() -> None:
+    log_dir = Path(os.environ.get("SYNAPSE_LOGS_DIR") or (Path.home() / ".synapse" / "logs")).resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=str(log_dir / "mcp_server.log"),
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
 
 TOOLS = [
     {
@@ -64,7 +80,7 @@ TOOLS = [
                 },
                 "category": {
                     "type": "string",
-                    "enum": ["preference", "decision", "architecture", "incident", "sop"],
+                    "enum": sorted(VALID_CATEGORIES),
                     "description": "Knowledge category (default 'decision').",
                     "default": "decision"
                 },
@@ -124,10 +140,22 @@ TOOLS = [
 
 
 def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    adapter = get_adapter()
     try:
         if name == "synapse_recall":
             query = arguments.get("query", "")
-            budget = int(arguments.get("budget", 300))
+            if not isinstance(query, str) or not query.strip():
+                return {
+                    "content": [{"type": "text", "text": "'query' must be a non-empty string."}],
+                    "isError": True
+                }
+            try:
+                budget = int(arguments.get("budget", 300))
+            except (TypeError, ValueError):
+                return {
+                    "content": [{"type": "text", "text": "'budget' must be an integer."}],
+                    "isError": True
+                }
             results = adapter.recall(query, budget=budget)
             if not results:
                 return {
@@ -143,15 +171,30 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
 
         elif name == "synapse_retain":
             content = arguments.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                return {
+                    "content": [{"type": "text", "text": "'content' must be a non-empty string."}],
+                    "isError": True
+                }
             category = arguments.get("category", "decision")
             salience = float(arguments.get("salience", 0.8))
             res = adapter.retain(content, category=category, salience=salience)
+            if res is not True:
+                return {
+                    "content": [{"type": "text", "text": "Failed to retain in Synapse Memory (storage unavailable or write rejected)."}],
+                    "isError": True
+                }
             return {
-                "content": [{"type": "text", "text": f"Successfully retained in Synapse Memory: {res}"}]
+                "content": [{"type": "text", "text": "Successfully retained in Synapse Memory: True"}]
             }
 
         elif name == "synapse_record_episode":
             title = arguments.get("title", "")
+            if not isinstance(title, str) or not title.strip():
+                return {
+                    "content": [{"type": "text", "text": "'title' must be a non-empty string."}],
+                    "isError": True
+                }
             situation = arguments.get("situation", "")
             action_taken = arguments.get("action_taken", "")
             outcome = arguments.get("outcome", "")
@@ -165,12 +208,22 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 lessons_learned=lessons,
                 salience=salience
             )
+            if not res:
+                return {
+                    "content": [{"type": "text", "text": "Failed to record episode in Synapse."}],
+                    "isError": True
+                }
             return {
                 "content": [{"type": "text", "text": f"Successfully recorded episode in Synapse: {res}"}]
             }
 
         elif name == "synapse_get_stats":
-            stats = adapter.storage.get_stats() if adapter.storage else {}
+            if adapter.storage is None:
+                return {
+                    "content": [{"type": "text", "text": "Synapse storage is unavailable."}],
+                    "isError": True
+                }
+            stats = adapter.storage.get_stats()
             return {
                 "content": [{"type": "text", "text": json.dumps(stats, indent=2)}]
             }
@@ -189,13 +242,112 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+def _configure_stdio() -> None:
+    """Force UTF-8 on stdin/stdout; the host may otherwise use a locale codec."""
+    for stream in (sys.stdin, sys.stdout):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="strict")
+            except Exception:
+                pass
+
+
 def send_response(response: Dict[str, Any]) -> None:
     line = json.dumps(response, ensure_ascii=False)
     sys.stdout.write(line + "\n")
     sys.stdout.flush()
 
 
+def _error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    }
+
+
+def dispatch(req: Any) -> Optional[Dict[str, Any]]:
+    """Handle one parsed request. Returns the response dict, or None for notifications."""
+    if not isinstance(req, dict):
+        return _error(None, -32600, "Invalid Request")
+
+    req_id = req.get("id")
+    is_notification = "id" not in req
+    method = req.get("method")
+    params = req.get("params") or {}
+
+    if not isinstance(method, str) or not method:
+        if is_notification:
+            return None
+        return _error(req_id, -32600, "Invalid Request")
+    if not isinstance(params, dict):
+        if is_notification:
+            return None
+        return _error(req_id, -32602, "Invalid params")
+
+    if method == "initialize":
+        response = {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "synapse-cortex",
+                    "version": SERVER_VERSION
+                }
+            }
+        }
+
+    elif method == "notifications/initialized":
+        return None
+
+    elif method == "tools/list":
+        response = {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": TOOLS
+            }
+        }
+
+    elif method == "tools/call":
+        tool_name = params.get("name", "")
+        tool_args = params.get("arguments") or {}
+        if not isinstance(tool_args, dict):
+            if is_notification:
+                return None
+            return _error(req_id, -32602, "Invalid params")
+        response = {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": handle_call_tool(tool_name, tool_args)
+        }
+
+    elif method == "ping":
+        response = {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {}
+        }
+
+    else:
+        if is_notification:
+            return None
+        return _error(req_id, -32601, f"Method not found: {method}")
+
+    return None if is_notification else response
+
+
 def main():
+    _configure_logging()
+    _configure_stdio()
     logger.info("Synapse MCP Server started.")
     for raw_line in sys.stdin:
         line = raw_line.strip()
@@ -205,67 +357,18 @@ def main():
             req = json.loads(line)
         except Exception as e:
             logger.error("JSON parse error: %s", e)
+            send_response(_error(None, -32700, "Parse error"))
             continue
 
-        req_id = req.get("id")
-        method = req.get("method")
-        params = req.get("params", {})
+        try:
+            response = dispatch(req)
+        except Exception as e:
+            logger.error("Unhandled request error: %s", e, exc_info=True)
+            req_id = req.get("id") if isinstance(req, dict) else None
+            response = _error(req_id, -32603, "Internal error")
 
-        if method == "initialize":
-            send_response({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "synapse-cortex",
-                        "version": "1.0.0"
-                    }
-                }
-            })
-
-        elif method == "notifications/initialized":
-            pass
-
-        elif method == "tools/list":
-            send_response({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "tools": TOOLS
-                }
-            })
-
-        elif method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
-            result = handle_call_tool(tool_name, tool_args)
-            send_response({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": result
-            })
-
-        elif method == "ping":
-            send_response({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {}
-            })
-
-        else:
-            if req_id is not None:
-                send_response({
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}"
-                    }
-                })
+        if response is not None:
+            send_response(response)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Legacy Migration Silently Disabled Foreign Keys:** `PRAGMA foreign_keys=ON` was issued after the row copy, but the copy opens an implicit transaction and the pragma is a no-op inside one — so every `ON DELETE CASCADE` silently stopped firing after a pre-1.0.3 migration. Enforcement is now restored before the connection is used.
 - **Consolidation Targeted the Wrong Database with `skip_external`:** Step 2.5 ignored the `--db-path` argument and consolidated the global default database instead of the requested one; it now uses `target_db` and honours `skip_external`.
 
+## [1.0.5] - 2026-11-04
+
+### Fixed
+- **Belief Revision No Longer Erases Distinct Facts:** `extract_numeric_specs` now binds numbers only to their own attribute (explicit `key: value`, a closed bridge vocabulary after the attribute, or a number with a recognized unit in front of it). `Project Alpha service 7 uses port 8007 with timeout 30s` yields `port=8007` and `timeout=30s` instead of `port=7` and `timeout=8007`. Subject identifiers such as `service 7` vs `service 8` now make two facts disjoint subjects, so 20 distinct numeric facts stay active instead of superseding each other.
+- **Retrieval Is Read-Only for Belief State:** `retrieve()` no longer calls `supersede_low_salience_nodes`. Contradicting candidates are filtered in-memory for the response only; persistent supersede happens at retain time and in the nightly consolidation audit.
+- **Failed Writes Roll Back:** New `_write()` helper rolls back the connection when a write raises. Duplicate URIs, FK violations and duplicate episode IDs no longer leave an open transaction that blocks every second connection until `busy_timeout` expires (`database is locked`). The connection is closed when initialisation fails instead of leaking.
+- **Legacy Node Migration Is Atomic and Recoverable:** The `synapse_nodes` rebuild now runs as one transaction and startup recovers databases left mid-rename by older releases (rows restored from `_synapse_nodes_old`) instead of exposing an empty table.
+- **Prune Keeps Superseded Nodes Until Archival:** `prune_exhausted_nodes` now only deletes active rows, so superseded records reach the superseded-archive rollup instead of being lost.
+- **MCP Server Reports Real Failures:** The stdio server forces UTF-8, answers malformed input with `-32700`/`-32600`/`-32602`/`-32601`/`-32603`, no longer crashes on array payloads or non-ASCII output, ignores notifications as JSON-RPC requires, reports `isError` when a write fails or storage is unavailable, exposes the package version and the full category enum (`general` included), and creates no database or log directory at import time (adapter and logging are lazy). `tests/test_mcp_protocol.py` covers the protocol end to end.
+
 ## [1.0.4] - 2026-11-02
 
 ### Fixed
