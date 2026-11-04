@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,7 +18,32 @@ from typing import Any, Dict, List, Optional
 # Setup logging (configured only when the server starts, never at import time)
 logger = logging.getLogger("synapse.mcp")
 
-SERVER_VERSION = "1.0.5"
+
+def _package_version() -> str:
+    """Single source of truth: installed metadata first, pyproject.toml second."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            return version("synapse-cortex")
+        except PackageNotFoundError:
+            pass
+    except Exception:
+        pass
+    try:
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        match = re.search(
+            r'^version\s*=\s*"([^"]+)"',
+            pyproject.read_text(encoding="utf-8"),
+            re.M,
+        )
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return "1.1.0"
+
+
+SERVER_VERSION = _package_version()
 
 from synapse.adapter import SynapseAdapter
 from synapse.stores.constants import VALID_CATEGORIES

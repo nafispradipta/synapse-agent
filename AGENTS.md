@@ -5,11 +5,11 @@
 ## Commands
 
 - Install: `pip install -e ".[dev]"`
-- Full suite: `python -m pytest` (340+ tests, ~9s). `pytest` is not always on PATH, so use `python -m pytest`.
+- Full suite: `python -m pytest` (362+ tests, ~22s). `pytest` is not always on PATH, so use `python -m pytest`.
 - Single test: `python -m pytest tests/test_schema_contract.py::test_schema_creates_expected_core_tables -q`
 - Smoke test: `python examples/quickstart.py` (in-memory, no API key needed). It has no `sys.path` bootstrap, so the repo root must be on the path first: `$env:PYTHONPATH="."` in PowerShell or `PYTHONPATH=.`, unless you already ran `pip install -e .`.
 - MCP server: `python -m synapse.mcp` (or `python scripts/mcp_server.py`)
-- No CI workflows, linter, formatter, or typecheck config exist. The test suite is the gate; do not invent tooling config.
+- No CI/linter/typecheck beyond the `pytest` gate in `.github/workflows/ci.yml`. The test suite is the gate; do not invent tooling config.
 
 ## Architecture
 

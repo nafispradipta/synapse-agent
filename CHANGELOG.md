@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-04
+
+### Fixed
+- **Vault Path Traversal and Frontmatter Injection:** `metadata.slug` is normalized to a single safe file stem and the writeback path is confined to `vault_path` via `Path.resolve()` + `relative_to` checks, so `slug="../../escape"` can no longer write outside the vault. Frontmatter values escape via `json.dumps`/`_yaml_flow_scalar` so quotes, newlines and YAML special characters stay inside valid scalars.
+- **Harvester Redirect and Size Limits:** `fetch_url_text` now validates each redirect hop against the domain whitelist, caps redirects at 5, checks `Content-Length` against a 2 MiB hard limit, and rejects bodies that exceed the cap.
+- **Tier 4 Quarantine Enforced:** Harvested research nodes are stored with `status="flagged"` (not `active`), so unvetted web content no longer appears in `recall()` or in FTS/vector ranking until explicitly promoted.
+- **Embedding Provenance and Freshness:** `synapse_vectors.model` column was added and `upsert_vector(node_id, vector, model=None)` now records it. `update_node` changing `l0_abstract` or `l1_overview` deletes the stale vector and re-embeds from text so `list_nodes_missing_vectors` can backfill.
+- **Vector Matrix Incremental Cache:** After `_incremental_upsert`/`_incremental_delete` the cached version is synced to the DB counter, so `incremental_cache = True` no longer rebuilds the matrix on every write.
+- **Unicode Token Estimation:** `estimate_tokens` now assigns 1 token to each CJK ideograph/kana/hangul/astral glyph, 0.5 to other non-ASCII and 0.25 to ASCII characters.
+- **NULL Edge Weight Crash:** `prune_decayed_edges` selects `COALESCE(weight, 0.5)` and `COALESCE(last_fired, 0)`, so NULL weights no longer raise `TypeError`.
+- **Compaction Status Honesty:** `optimize_and_compact` sets `results["status"] = compaction_status(results)` and a module-level `compaction_status` helper returns `"partial"` when any step recorded an error.
+
+### Added
+- **Test Isolation:** `tests/conftest.py` redirects `HOME`/`USERPROFILE` to `tmp_path` and strips all `SYNAPSE_*`/`OPENAI_*` env vars per test. Adapter's default research dir moved from `./data/research/auto_harvest` to `~/.synapse/research/auto_harvest`, so the suite no longer writes `data/` into the repo.
+- **Schema Versioning:** `PRAGMA user_version` is stamped to 1 on init and a one-shot migration narrows the FTS `AFTER UPDATE` triggers to only fire on text-column changes, removing read-touch FTS churn.
+
+### Changed
+- **CI:** `.github/workflows/ci.yml` runs `python -m pytest -q` on `ubuntu-latest` for Python `3.9` and `3.12` on every push/pull request to `main`.
+- **Docs Cleanup:** README/CONTRIBUTING now document `python -m pytest` (no bare `pytest`), test counts (351) and the real default database path (`~/.synapse/synapse.db`). `.env.example` dropped dead keys (`SYNAPSE_TOKEN_BUDGET`, `SYNAPSE_L0_BUDGET`, `SYNAPSE_L1_BUDGET`, `SYNAPSE_SYNC_STATE_PATH`) and documents `SYNAPSE_RESEARCH_DIR`.
+- **Version Source:** `SERVER_VERSION` in `synapse/mcp.py` now resolves via `importlib.metadata` and falls back to `pyproject.toml`, so server, package and docs cannot drift.
+
 ## [Unreleased]
 
 ### Changed
