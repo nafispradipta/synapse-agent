@@ -62,6 +62,30 @@ SPEC_CANONICAL_MAP: Dict[str, str] = {
     "kuota": "quota",
 }
 
+# Countable instances whose trailing number identifies the subject rather than
+# a specification attached to it (e.g. 'service 7', not 'ram 7').
+INSTANCE_NOUNS: Set[str] = {
+    "service", "server", "node", "instance", "cluster", "shard", "pod",
+    "container", "project", "tenant", "account", "environment", "env",
+    "host", "vps", "machine", "device", "region", "replica", "worker",
+    "thread", "process",
+}
+
+_SUBJECT_ID_RE = re.compile(
+    r"\b(" + "|".join(sorted(INSTANCE_NOUNS)) + r")\s*[:#]?\s*(\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_subject_ids(text: str) -> Set[str]:
+    """Return identifiers such as 'service:7' that name a countable subject."""
+    if not text:
+        return set()
+    return {
+        f"{m.group(1).lower()}:{m.group(2)}"
+        for m in _SUBJECT_ID_RE.finditer(text)
+    }
+
 # Units recognized for specifications
 KNOWN_UNITS: Set[str] = {
     "gb", "mb", "tb", "kb", "g", "m", "k", "b", "core", "cores", "cpu", "cpus",
@@ -152,32 +176,45 @@ def extract_numeric_specs(text: str) -> Dict[str, Tuple[float, str]]:
     """
     Extract key numeric specifications from text, returning a map of:
     attribute -> (numeric_value, normalized_unit).
-    Handles patterns like:
-    - '2GB RAM', '8 GB RAM', '4 core CPU', '60s timeout'
-    - 'RAM 2GB', 'RAM: 4GB', 'port 8080', 'timeout 30s'
-    - 'port_api = 8080', 'worker_threads: 4'
-    - 'PostgreSQL 14', 'Python 3.11'
+
+    Numeric claims are only bound when a number is syntactically tied to the
+    attribute: an explicit ``key: value`` / ``key = value`` binding, an attribute
+    followed directly by a number (allowing a closed vocabulary of bridge words
+    such as 'of', 'is', 'capacity'), or a number with a recognized unit followed
+    by the attribute ('8 GB RAM', '4 core CPU', '30s timeout'). Arbitrary words
+    are never treated as units, which prevents '7 uses port 8007' from binding
+    7 -> port or '8007 with timeout' from binding 8007 -> timeout.
     """
     specs: Dict[str, Tuple[float, str]] = {}
     if not text:
         return specs
 
-    # 1. Number + unit followed by attribute (e.g. '8 GB RAM', '100 GB disk', '4 core CPU', '8 GB memori')
-    for attr in SPEC_ATTRIBUTES:
-        pat = (
-            r"(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)\s+(?:of\s+)?\b"
-            + re.escape(attr)
-            + r"\b"
-        )
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            val = float(m.group(1))
-            raw_unit = m.group(2).lower()
-            unit = UNIT_NORMALIZATION.get(raw_unit, raw_unit if raw_unit in KNOWN_UNITS else "")
-            canonical_attr = SPEC_CANONICAL_MAP.get(attr, attr)
-            specs[canonical_attr] = (val, unit)
+    bridge = (
+        r"(?:of|is|are|was|were|adalah|sebesar|sebanyak|sekitar|about|"
+        r"approximately|capacity|size|limit|value|total|max|maximum|min|minimum|"
+        r"api|http|grpc)"
+    )
 
-    # 2. Spec attribute followed by optional relation and number + unit (without jumping over conjunctions)
+    # 1. Explicit key:value / key = value, e.g. "worker_threads: 4", "version: 16"
+    p_explicit = re.finditer(
+        r"\b([a-zA-Z_][a-zA-Z0-9_]{2,20})\s*(?::|=)\s*(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)?\b",
+        text,
+        re.IGNORECASE,
+    )
+    for m in p_explicit:
+        raw_attr = m.group(1).lower()
+        if raw_attr in STOPWORDS or raw_attr in INSTANCE_NOUNS:
+            continue
+        canonical_attr = SPEC_CANONICAL_MAP.get(raw_attr, raw_attr)
+        if canonical_attr in specs:
+            continue
+        val = float(m.group(2))
+        raw_unit = (m.group(3) or "").lower()
+        unit = UNIT_NORMALIZATION.get(raw_unit, raw_unit if raw_unit in KNOWN_UNITS else "")
+        specs[canonical_attr] = (val, unit)
+
+    # 2. Attribute followed by optional bridge words and a number,
+    #    e.g. 'port 8080', 'RAM is 4GB', 'Disk capacity of 100GB'
     for attr in SPEC_ATTRIBUTES:
         canonical_attr = SPEC_CANONICAL_MAP.get(attr, attr)
         if canonical_attr in specs:
@@ -185,7 +222,10 @@ def extract_numeric_specs(text: str) -> Dict[str, Tuple[float, str]]:
         pat2 = (
             r"\b"
             + re.escape(attr)
-            + r"\b(?:\s+(?!and|dan|with|dengan|or|atau)[a-zA-Z0-9_\-]+){0,2}\s*(?::|=|adalah|sebesar|sebanyak|is)?\s*(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)?\b"
+            + r"\b(?:\s+"
+            + bridge
+            + r"\b){0,3}"
+            r"\s*(?::|=)?\s*(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)?\b"
         )
         m2 = re.search(pat2, text, re.IGNORECASE)
         if m2:
@@ -194,20 +234,28 @@ def extract_numeric_specs(text: str) -> Dict[str, Tuple[float, str]]:
             unit = UNIT_NORMALIZATION.get(raw_unit, raw_unit if raw_unit in KNOWN_UNITS else "")
             specs[canonical_attr] = (val, unit)
 
-    # 3. Explicit key:value syntax e.g. "worker_threads: 4", "batch_size = 100", "version: 16"
-    p3 = re.finditer(r"\b([a-zA-Z_][a-zA-Z0-9_]{2,20})\s*(?::|=)\s*(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)?\b", text, re.IGNORECASE)
-    for m in p3:
-        raw_attr = m.group(1).lower()
-        if raw_attr in STOPWORDS:
+    # 3. Number with a recognized unit followed by the attribute,
+    #    e.g. '8 GB RAM', '4 core CPU', '30s timeout'
+    for attr in SPEC_ATTRIBUTES:
+        canonical_attr = SPEC_CANONICAL_MAP.get(attr, attr)
+        if canonical_attr in specs:
             continue
-        canonical_attr = SPEC_CANONICAL_MAP.get(raw_attr, raw_attr)
-        if canonical_attr not in specs:
-            val = float(m.group(2))
-            raw_unit = (m.group(3) or "").lower()
-            unit = UNIT_NORMALIZATION.get(raw_unit, raw_unit if raw_unit in KNOWN_UNITS else "")
-            specs[canonical_attr] = (val, unit)
+        pat3 = (
+            r"(?<![\w\-])(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)\s+(?:of\s+)?\b"
+            + re.escape(attr)
+            + r"\b"
+        )
+        m3 = re.search(pat3, text, re.IGNORECASE)
+        if not m3:
+            continue
+        raw_unit = m3.group(2).lower()
+        if raw_unit not in KNOWN_UNITS and raw_unit not in UNIT_NORMALIZATION:
+            continue
+        val = float(m3.group(1))
+        unit = UNIT_NORMALIZATION.get(raw_unit, raw_unit if raw_unit in KNOWN_UNITS else "")
+        specs[canonical_attr] = (val, unit)
 
-    # 4. Software/engine version progression e.g. "PostgreSQL 14", "Postgres 16", "Python 3.11", "Node 20"
+    # 4. Software/engine version progression e.g. "PostgreSQL 14", "Python 3.11"
     p4 = re.finditer(r"\b(postgresql|postgres|sqlite|mysql|redis|python|node|ubuntu|go|linux|kafka)\s*(?:version|v)?\s*[:=]?\s*(\d+(?:\.\d+)?)\b", text, re.IGNORECASE)
     for m in p4:
         tech_name = m.group(1).lower()
@@ -433,6 +481,13 @@ class ContradictionResolver:
         """
         text_a = self._get_node_text(node_a)
         text_b = self._get_node_text(node_b)
+
+        ids_a = extract_subject_ids(text_a)
+        ids_b = extract_subject_ids(text_b)
+        if ids_a and ids_b and ids_a.isdisjoint(ids_b):
+            # Different services/servers/nodes are different subjects, so
+            # differing numbers are not a revision of the same belief.
+            return None
 
         # 1. Numeric / specification mismatch check
         specs_a = extract_numeric_specs(text_a)

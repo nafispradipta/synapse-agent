@@ -692,3 +692,52 @@ def test_word_boundary_immunity_for_otomatis_and_automatic(tmp_path: Path) -> No
     active = adapter.storage.list_nodes(status="active")
     assert len(active) == 2, "Automatic and manual backups must both stay active without false supersede"
     adapter.storage.close()
+
+
+def test_extract_numeric_specs_binds_values_to_their_own_attribute() -> None:
+    specs = extract_numeric_specs(
+        "Project Alpha service 7 uses port 8007 with timeout 30s."
+    )
+    assert specs["port"] == (8007.0, "")
+    assert specs["timeout"] == (30.0, "s")
+    assert "service" not in specs
+
+    specs2 = extract_numeric_specs("Service 3 runs on port 9003 with timeout 45s.")
+    assert specs2["port"] == (9003.0, "")
+    assert specs2["timeout"] == (45.0, "s")
+
+
+def test_numeric_facts_for_distinct_services_are_not_contradictions() -> None:
+    adapter = SynapseAdapter({"db_path": ":memory:"})
+    try:
+        for i in range(20):
+            adapter.retain(
+                f"Project Alpha service {i} uses port {8000 + i} "
+                f"and has timeout {30 + i}s.",
+                category="architecture",
+                salience=0.5,
+            )
+        statuses = adapter.storage.get_stats()["statuses"]
+        assert statuses.get("active") == 20
+        assert statuses.get("superseded", 0) == 0
+    finally:
+        adapter.storage.close()
+
+
+def test_same_service_spec_change_still_supersedes() -> None:
+    adapter = SynapseAdapter({"db_path": ":memory:"})
+    try:
+        adapter.retain(
+            "Service 7 uses port 8007 with timeout 30s.",
+            category="architecture",
+            salience=0.5,
+        )
+        adapter.retain(
+            "Service 7 uses port 9007 with timeout 45s.",
+            category="architecture",
+            salience=0.5,
+        )
+        assert len(adapter.storage.list_nodes(status="active")) == 1
+        assert len(adapter.storage.list_nodes(status="superseded")) == 1
+    finally:
+        adapter.storage.close()
