@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
 import logging
 import os
 import re
@@ -667,6 +668,25 @@ class SynapseAdapter(BaseMemoryAdapter):
         except Exception as e:
             logger.warning("Failed to update domain index for %s: %s", slug, e)
 
+    @staticmethod
+    def _safe_vault_slug(raw: Any) -> str:
+        """Normalize a user-supplied slug to a single safe file stem."""
+        text = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw)).strip("-") or "note"
+        return text.strip(".") or "note"
+
+    @staticmethod
+    def _yaml_flow_scalar(value: Any) -> str:
+        """Quote a YAML flow scalar only when it is not a bare word."""
+        text = str(value)
+        if re.fullmatch(r"[A-Za-z0-9_.-]+", text):
+            return text
+        return json.dumps(text, ensure_ascii=False)
+
+    @staticmethod
+    def _yaml_quote(value: Any) -> str:
+        """Render a YAML-safe double-quoted scalar for arbitrary content."""
+        return json.dumps(str(value), ensure_ascii=False)
+
     def _auto_writeback_vault(
         self,
         stored_id: int,
@@ -733,24 +753,26 @@ class SynapseAdapter(BaseMemoryAdapter):
             title = title.replace("\n", " ").strip()
 
             slug = meta.get("slug")
-            if not slug:
+            if slug:
+                slug = self._safe_vault_slug(slug)
+            else:
                 clean_slug = re.sub(r"[^a-zA-Z0-9\s_-]", "", title.lower()).strip()
                 slug_words = clean_slug.split()[:8]
-                slug = "-".join(slug_words).strip("-")
+                slug = "-".join(slug_words).strip("-") or f"{category}-{uuid.uuid4().hex[:6]}"
             if not slug:
                 slug = f"{category}-{uuid.uuid4().hex[:6]}"
 
             date_str = datetime.date.today().isoformat()
-            escaped_title = title.replace('"', '\\"')
-            tags_str = ", ".join(final_tags)
+            escaped_title = self._yaml_quote(title)
+            tags_str = ", ".join(self._yaml_flow_scalar(tag) for tag in final_tags)
 
             frontmatter = (
                 "---\n"
-                f'title: "{escaped_title}"\n'
+                f"title: {escaped_title}\n"
                 f"tags: [{tags_str}]\n"
                 f"date: {date_str}\n"
                 f"salience: {salience:.2f}\n"
-                f'uri: "{uri}"\n'
+                f"uri: {self._yaml_quote(uri)}\n"
                 "status: active\n"
                 "---\n\n"
             )
@@ -777,7 +799,12 @@ class SynapseAdapter(BaseMemoryAdapter):
             ])
 
             markdown_content = frontmatter + "\n".join(body_lines)
-            target_file = target_dir / f"{slug}.md"
+            target_file = (target_dir / f"{slug}.md").resolve()
+            try:
+                target_file.relative_to(vault_base)
+            except ValueError:
+                logger.warning("Vault slug %r escapes vault; skipping writeback", slug)
+                return None
 
             with open(target_file, "w", encoding="utf-8") as f:
                 f.write(markdown_content)
