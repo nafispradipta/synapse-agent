@@ -5,7 +5,7 @@
 [![PyPI: synapse-cortex](https://img.shields.io/pypi/v/synapse-cortex.svg)](https://pypi.org/project/synapse-cortex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-brightgreen.svg)](pyproject.toml)
-[![Tests: 318 Passed](https://img.shields.io/badge/Tests-318%20Passed-success.svg)](tests/)
+[![Tests: 351 Passed](https://img.shields.io/badge/Tests-351%20Passed-success.svg)](tests/)
 [![Architecture: Local--First](https://img.shields.io/badge/Architecture-Local--First%20SQLite%20WAL-purple.svg)](synapse/storage.py)
 
 ---
@@ -251,11 +251,8 @@ cp .env.example .env
 Edit `.env` according to your requirements:
 
 ```bash
-# SQLite Database location (default: ./data/synapse.db)
+# SQLite Database location (default: ~/.synapse/synapse.db)
 SYNAPSE_DB_PATH=./data/synapse.db
-
-# Context Packing Token Budget
-SYNAPSE_TOKEN_BUDGET=250
 
 # Standard OpenAI-Compatible LLM Settings
 OPENAI_BASE_URL=https://api.openai.com/v1
@@ -283,11 +280,11 @@ OPENAI_MODEL=gpt-4o-mini
 Synapse comes with an exhaustive test suite covering all cognitive subsystems:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 ```text
-============================= 318 passed in 10.20s =============================
+================================ 351 passed in 24.00s =============================
 ```
 
 - **Belief Revision & Contradiction Resolution:** `test_contradiction_resolver.py`

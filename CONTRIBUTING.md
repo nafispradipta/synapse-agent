@@ -25,12 +25,12 @@ Thank you for your interest in contributing to `synapse-agent`! We welcome contr
 
 Before submitting a pull request, ensure all tests pass:
 ```bash
-pytest tests/
+python -m pytest
 ```
 
 To run tests with coverage reporting:
 ```bash
-pytest --cov=synapse tests/
+python -m pytest --cov=synapse
 ```
 
 ## Guidelines
