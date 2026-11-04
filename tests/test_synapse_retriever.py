@@ -398,9 +398,8 @@ class TestTrueHybridRRFAndLockSafety:
             assert "rrf_score" in r
             assert r["rrf_score"] > 0.0
 
-    def test_contradiction_resolution_under_storage_lock(self, mem_storage):
-        """Verify post-retrieval contradiction resolution executes under storage lock."""
-        # Two opposing nodes with high salience/confidence
+    def test_retrieval_does_not_mutate_belief_state(self, mem_storage):
+        """Retrieval may hide a contradiction in the response, never in storage."""
         n1 = mem_storage.add_node(
             uri="synapse://decision/postgres_use",
             l0_abstract="Always prefer PostgreSQL for production relational persistence.",
@@ -417,9 +416,14 @@ class TestTrueHybridRRFAndLockSafety:
         )
 
         retriever = SynapseRetriever(storage=mem_storage)
-        results = retriever.retrieve("PostgreSQL database preference", limit=5)
-        
-        # Winner should remain active, loser superseded
-        loser_node = mem_storage.get_node(n2)
-        assert loser_node["status"] == "superseded"
+        results = retriever.retrieve(
+            "PostgreSQL database preference", limit=5, touch=False
+        )
+
+        assert mem_storage.get_node(n1)["status"] == "active"
+        assert mem_storage.get_node(n2)["status"] == "active"
+        assert n2 not in [item["id"] for item in results]
+
+        retriever.retrieve("PostgreSQL database preference", limit=5, touch=True)
+        assert mem_storage.get_node(n2)["status"] == "active"
 

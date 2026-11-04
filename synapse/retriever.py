@@ -1009,6 +1009,9 @@ class SynapseRetriever:
         # Step 6.5: Post-Retrieval Belief Revision & Contradiction Resolution
         # Pre-sort candidates by composite score, then check contradictions only on top-K candidate pool
         # to prevent O(N^2) explosion (e.g. 479 nodes -> 114k pairs -> 12s latency).
+        # Retrieval never mutates belief state: the lower-ranked contender is
+        # hidden from this response only. Persistent supersede happens in the
+        # retain-time resolver and the nightly consolidation audit.
         if len(candidates) >= 2:
             try:
                 candidates.sort(
@@ -1026,10 +1029,6 @@ class SynapseRetriever:
                     loser_ids = {c["loser_id"] for c in conflicts if c.get("loser_id")}
                     if loser_ids:
                         candidates = [cand for cand in candidates if cand.get("id") not in loser_ids]
-                        try:
-                            self.storage.supersede_low_salience_nodes(list(loser_ids))
-                        except Exception:
-                            pass
             except Exception:
                 pass
 
