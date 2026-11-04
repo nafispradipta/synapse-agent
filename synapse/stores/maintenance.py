@@ -100,6 +100,7 @@ class MaintenanceStore:
                 WHERE salience < 0.25
                   AND strength <= 0.05
                   AND category NOT IN ('preference', 'decision', 'architecture', 'sop')
+                  AND status = 'active'
                 """
             )
             self._conn.commit()
