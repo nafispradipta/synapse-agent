@@ -248,7 +248,7 @@ _TRIGGERS_NODE_FTS = (
     END;
     """,
     """
-    CREATE TRIGGER IF NOT EXISTS synapse_nodes_au AFTER UPDATE ON synapse_nodes BEGIN
+    CREATE TRIGGER IF NOT EXISTS synapse_nodes_au AFTER UPDATE OF l0_abstract, l1_overview ON synapse_nodes BEGIN
         DELETE FROM synapse_fts WHERE id = old.id;
         INSERT INTO synapse_fts (id, l0_abstract, l1_overview)
         VALUES (new.id, new.l0_abstract, coalesce(new.l1_overview, ''));
@@ -277,7 +277,7 @@ _TRIGGERS_EPISODE_FTS = (
     END;
     """,
     """
-    CREATE TRIGGER IF NOT EXISTS episodes_au AFTER UPDATE ON episodes BEGIN
+    CREATE TRIGGER IF NOT EXISTS episodes_au AFTER UPDATE OF title, situation, action_taken, outcome, lessons_learned, tags ON episodes BEGIN
         DELETE FROM episodes_fts WHERE id = old.id;
         INSERT INTO episodes_fts (id, title, situation, action_taken, outcome, lessons_learned, tags)
         VALUES (
@@ -372,6 +372,13 @@ class SchemaMixin:
             # Stay compatible with concurrent writers holding the WAL briefly.
             self._conn.execute("PRAGMA busy_timeout=10000;")
 
+    def _migrate_triggers_v1(self, cursor: Any) -> None:
+        """Narrow the AFTER UPDATE FTS triggers (user_version < 1)."""
+        cursor.execute("DROP TRIGGER IF EXISTS synapse_nodes_au;")
+        cursor.execute("DROP TRIGGER IF EXISTS episodes_au;")
+        cursor.execute(_TRIGGERS_NODE_FTS[-1])
+        cursor.execute(_TRIGGERS_EPISODE_FTS[-1])
+
     def _init_schema(self) -> None:
         """Create tables, indexes, FTS5 virtual tables, and sync triggers."""
         with self._lock:
@@ -383,6 +390,10 @@ class SchemaMixin:
             self._create_episode_fts(cursor)
             self._create_vector_tables(cursor)
             self._create_knowledge_tables(cursor)
+            current = self._conn.execute("PRAGMA user_version;").fetchone()[0]
+            if current < 1:
+                self._migrate_triggers_v1(cursor)
+            self._conn.execute("PRAGMA user_version=1;")
             self._conn.commit()
 
     def _create_node_tables(self, cursor: Any) -> None:

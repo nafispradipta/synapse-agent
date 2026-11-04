@@ -431,3 +431,42 @@ def test_recovery_restores_post_legacy_columns(tmp_path):
         assert {"salience", "confidence", "access_count"} <= columns
     finally:
         storage.close()
+
+
+def test_fresh_database_stamps_user_version(storage):
+    assert storage._conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_upgrade_from_user_version_zero_migrates_triggers(tmp_path):
+    db_file = tmp_path / "legacy-triggers.db"
+    _write_legacy_db(db_file)
+
+    conn = sqlite3.connect(str(db_file))
+    try:
+        conn.execute(
+            "CREATE TRIGGER synapse_nodes_au AFTER UPDATE ON synapse_nodes BEGIN "
+            "  DELETE FROM synapse_fts WHERE id = old.id; "
+            "END"
+        )
+        conn.execute("PRAGMA user_version=0")
+        conn.commit()
+    finally:
+        conn.close()
+
+    storage = SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+    try:
+        row = storage._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='synapse_nodes_au'"
+        ).fetchone()
+        assert "AFTER UPDATE OF" in row[0]
+        assert storage._conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+        nid = storage.add_node(uri="synapse://ver/1", l0_abstract="original text")
+        storage.update_node(nid, last_accessed=1234567890)
+        assert storage.search_fts("original", limit=1)
+
+        storage.update_node(nid, l0_abstract="completely different content")
+        hits = storage.search_fts("completely", limit=1)
+        assert [row["id"] for row in hits] == [nid]
+    finally:
+        storage.close()
