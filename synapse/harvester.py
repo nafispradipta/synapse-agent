@@ -30,6 +30,29 @@ DEFAULT_WHITELIST_DOMAINS: Set[str] = {
 }
 
 
+MAX_FETCH_BYTES = 2 * 1024 * 1024  # 2 MiB hard cap on response bodies
+_MAX_REDIRECTS = 5
+
+
+class _WhitelistRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only while each hop stays on the whitelist."""
+
+    def __init__(self, check_url: Any) -> None:
+        super().__init__()
+        self._check_url = check_url
+        self._redirects = 0
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if self._redirects >= _MAX_REDIRECTS:
+            raise urllib.error.HTTPError(newurl, code, "too many redirects", headers, fp)
+        self._redirects += 1
+        if not self._check_url(newurl):
+            raise urllib.error.HTTPError(
+                newurl, code, f"redirect blocked by whitelist: {newurl}", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def sanitize_slug(text: str) -> str:
     """Convert string to safe filename slug."""
     clean = re.sub(r"[^\w\s\-]", "", text.lower()).strip()
@@ -81,6 +104,9 @@ class SynapseWebHarvester:
             return None
 
         try:
+            opener = urllib.request.build_opener(
+                _WhitelistRedirectHandler(self.is_domain_allowed)
+            )
             req = urllib.request.Request(
                 url,
                 headers={
@@ -88,8 +114,16 @@ class SynapseWebHarvester:
                     "Accept": "text/html,application/xhtml+xml,application/xml,application/atom+xml;q=0.9,*/*;q=0.8",
                 },
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                content = resp.read().decode("utf-8", errors="ignore")
+            with opener.open(req, timeout=timeout) as resp:
+                length = resp.headers.get("Content-Length")
+                if length and length.isdigit() and int(length) > MAX_FETCH_BYTES:
+                    logger.warning("URL body too large (%s bytes): %s", length, url)
+                    return None
+                raw = resp.read(MAX_FETCH_BYTES + 1)
+                if len(raw) > MAX_FETCH_BYTES:
+                    logger.warning("URL body exceeded %d bytes: %s", MAX_FETCH_BYTES, url)
+                    return None
+                content = raw.decode("utf-8", errors="ignore")
                 clean_text = re.sub(r"<script.*?>.*?</script>", "", content, flags=re.DOTALL)
                 clean_text = re.sub(r"<style.*?>.*?</style>", "", clean_text, flags=re.DOTALL)
                 clean_text = re.sub(r"<[^>]+>", " ", clean_text)
