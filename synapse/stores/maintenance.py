@@ -8,6 +8,16 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
+def compaction_status(results: Dict[str, Any]) -> str:
+    """Summarize per-step compaction results as ok or partial."""
+    failed = any(
+        isinstance(value, str) and value.startswith("error")
+        for key, value in results.items()
+        if key not in ("status", "timestamp")
+    )
+    return "partial" if failed else "ok"
+
+
 class MaintenanceStore:
     """Lifecycle operations run by consolidation jobs rather than by readers."""
 
@@ -43,6 +53,8 @@ class MaintenanceStore:
             except Exception as e:
                 results["vacuum"] = f"error: {e}"
 
+        # Surface partial failures instead of always reporting ok.
+        results["status"] = compaction_status(results)
         return results
 
     def lock_critical_nodes(self) -> int:
