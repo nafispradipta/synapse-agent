@@ -327,3 +327,54 @@ def test_rebuild_restores_pragmas_when_the_copy_fails(storage):
         "PRAGMA foreign_keys=ON;",
         "PRAGMA legacy_alter_table=OFF;",
     ]
+
+
+def test_failed_legacy_rebuild_keeps_rows_and_old_table(tmp_path, monkeypatch):
+    """A failure inside the rebuild must roll back rename, create, and copy."""
+    import synapse.stores.schema as schema_module
+
+    db_file = tmp_path / "legacy-atomic.db"
+    _write_legacy_db(db_file)
+    monkeypatch.setattr(
+        schema_module, "_DDL_SYNAPSE_NODES_REBUILT", "CREATE TABLE broken ("
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+
+    check = sqlite3.connect(str(db_file))
+    try:
+        assert check.execute("SELECT COUNT(*) FROM synapse_nodes").fetchone()[0] == 1
+        assert check.execute(
+            "SELECT name FROM sqlite_master WHERE name = '_synapse_nodes_old'"
+        ).fetchone() is None
+    finally:
+        check.close()
+
+
+def test_startup_recovers_interrupted_legacy_rebuild(tmp_path):
+    """A DB left mid-rename must restore its rows instead of exposing an empty table."""
+    from synapse.stores.schema import _DDL_SYNAPSE_NODES_REBUILT
+
+    db_file = tmp_path / "legacy-interrupted.db"
+    _write_legacy_db(db_file)
+
+    broken = sqlite3.connect(str(db_file))
+    try:
+        broken.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old")
+        broken.execute(_DDL_SYNAPSE_NODES_REBUILT)
+        broken.commit()
+    finally:
+        broken.close()
+
+    storage = SynapseStorage(db_path=str(db_file), allow_custom_categories=True)
+    try:
+        node = storage.get_node("legacy-1")
+        assert node is not None
+        assert node["uri"] == "synapse://legacy/one"
+        assert storage.get_stats()["node_count"] == 1
+        assert storage._conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = '_synapse_nodes_old'"
+        ).fetchone() is None
+    finally:
+        storage.close()

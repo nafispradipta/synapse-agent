@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any, Iterator
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -368,14 +371,7 @@ class SchemaMixin:
         cursor.execute(_DDL_SYNAPSE_NODES)
 
         # Auto-migrate synapse_nodes if columns are missing in existing databases
-        cursor.execute("PRAGMA table_info(synapse_nodes);")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        if "salience" not in existing_cols:
-            cursor.execute("ALTER TABLE synapse_nodes ADD COLUMN salience REAL DEFAULT 0.5;")
-        if "confidence" not in existing_cols:
-            cursor.execute("ALTER TABLE synapse_nodes ADD COLUMN confidence REAL DEFAULT 1.0;")
-        if "access_count" not in existing_cols:
-            cursor.execute("ALTER TABLE synapse_nodes ADD COLUMN access_count INTEGER DEFAULT 0;")
+        self._ensure_node_columns(cursor)
 
         # 1b. Synapse Superseded Archive (Abstract Rollup historical storage)
         cursor.execute(_DDL_SYNAPSE_SUPERSEDED_ARCHIVE)
@@ -387,18 +383,121 @@ class SchemaMixin:
         for statement in _INDEXES_SYNAPSE_NODES:
             cursor.execute(statement)
 
+    def _ensure_node_columns(self, cursor: Any) -> None:
+        """Add columns introduced after the original schema if missing."""
+        cursor.execute("PRAGMA table_info(synapse_nodes);")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        additions = {
+            "salience": "REAL DEFAULT 0.5",
+            "confidence": "REAL DEFAULT 1.0",
+            "access_count": "INTEGER DEFAULT 0",
+        }
+        for column, ddl in additions.items():
+            if column not in existing_cols:
+                cursor.execute(
+                    f"ALTER TABLE synapse_nodes ADD COLUMN {column} {ddl};"
+                )
+
+    def _recover_interrupted_node_rebuild(self) -> None:
+        """Repair a database left mid-rebuild by a non-atomic migration.
+
+        Older releases auto-committed the table rename and the recreated
+        table but copied rows in a separate implicit transaction, so a crash
+        left an empty ``synapse_nodes`` behind while rows survived in
+        ``_synapse_nodes_old``. This restores the old table (or merges its
+        rows into the new one) before any other migration logic runs.
+        """
+        old = self._conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='_synapse_nodes_old';"
+        ).fetchone()
+        if not old:
+            return
+
+        live = self._conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='synapse_nodes';"
+        ).fetchone()
+        live_rows = 0
+        if live:
+            live_rows = self._conn.execute(
+                "SELECT COUNT(*) FROM synapse_nodes;"
+            ).fetchone()[0]
+        old_rows = self._conn.execute(
+            "SELECT COUNT(*) FROM _synapse_nodes_old;"
+        ).fetchone()[0]
+
+        logger.warning(
+            "Recovering interrupted synapse_nodes rebuild "
+            "(live_rows=%s, old_rows=%s)",
+            live_rows,
+            old_rows,
+        )
+        self._conn.execute("PRAGMA foreign_keys=OFF;")
+        if self._conn.in_transaction:
+            self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
+        restored = False
+        try:
+            if live and live_rows == 0 and old_rows > 0:
+                self._conn.execute("DROP TABLE synapse_nodes;")
+                live = None
+            if not live:
+                self._conn.execute(
+                    "ALTER TABLE _synapse_nodes_old RENAME TO synapse_nodes;"
+                )
+                restored = True
+            else:
+                live_cols = {
+                    row[1]
+                    for row in self._conn.execute("PRAGMA table_info(synapse_nodes);")
+                }
+                old_cols = {
+                    row[1]
+                    for row in self._conn.execute(
+                        "PRAGMA table_info(_synapse_nodes_old);"
+                    )
+                }
+                ordered = (
+                    "id", "uri", "l0_abstract", "l1_overview", "l2_target_path",
+                    "category", "importance", "strength", "created_at",
+                    "last_accessed", "status", "salience", "confidence",
+                    "access_count",
+                )
+                shared = [c for c in ordered if c in live_cols and c in old_cols]
+                columns = ", ".join(shared)
+                self._conn.execute(
+                    f"INSERT OR IGNORE INTO synapse_nodes ({columns}) "
+                    f"SELECT {columns} FROM _synapse_nodes_old;"
+                )
+                self._conn.execute("DROP TABLE _synapse_nodes_old;")
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
+        finally:
+            self._conn.execute("PRAGMA foreign_keys=ON;")
+
+        if restored:
+            self._ensure_node_columns(self._conn.cursor())
+
     def _rebuild_obsolete_nodes_table(self, cursor: Any) -> None:
         """Drop the legacy category CHECK constraint and accept 'flagged' status."""
+        self._recover_interrupted_node_rebuild()
+
         cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='synapse_nodes';")
         node_table_row = cursor.fetchone()
         if not node_table_row or not node_table_row[0]:
             return
         table_sql = node_table_row[0]
-        if "CHECK(category IN" not in table_sql and "'flagged'" in table_sql:
+        if "CHECK(category IN" not in table_sql:
             return
         cursor.execute("PRAGMA legacy_alter_table=ON;")
         cursor.execute("PRAGMA foreign_keys=OFF;")
+        if self._conn.in_transaction:
+            self._conn.commit()
         try:
+            self._conn.execute("BEGIN IMMEDIATE")
             cursor.execute("ALTER TABLE synapse_nodes RENAME TO _synapse_nodes_old;")
             cursor.execute(_DDL_SYNAPSE_NODES_REBUILT)
             cursor.execute("""
@@ -414,13 +513,10 @@ class SchemaMixin:
                 FROM _synapse_nodes_old;
             """)
             cursor.execute("DROP TABLE _synapse_nodes_old;")
-        except Exception:
+            self._conn.commit()
+        except BaseException:
             self._conn.rollback()
             raise
-        else:
-            # The row copy opens an implicit transaction and PRAGMA foreign_keys
-            # is a no-op inside one, so commit first or enforcement stays off.
-            self._conn.commit()
         finally:
             cursor.execute("PRAGMA foreign_keys=ON;")
             cursor.execute("PRAGMA legacy_alter_table=OFF;")
