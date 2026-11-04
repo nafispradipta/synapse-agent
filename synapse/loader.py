@@ -14,12 +14,31 @@ from synapse.storage import SynapseStorage
 
 def estimate_tokens(text: str) -> int:
     """
-    Estimate token count for a text string using standard ~4 chars/token heuristic.
+    Estimate token count for a text string.
+
+    CJK ideographs, kana, hangul syllables and astral-plane glyphs (emoji) count
+    as one token each. ASCII costs ~4 chars per token, other non-ASCII ~2.
     Uses ceiling to ensure conservative budget bounds.
     """
     if not text:
         return 0
-    return max(1, math.ceil(len(text) / 4.0))
+
+    count = 0.0
+    for ch in text:
+        cp = ord(ch)
+        if (
+            0x3400 <= cp <= 0x4DBF   # CJK ext A
+            or 0x4E00 <= cp <= 0x9FFF   # CJK unified ideographs
+            or 0x3040 <= cp <= 0x30FF   # hiragana/katakana
+            or 0xAC00 <= cp <= 0xD7AF   # hangul syllables
+            or cp >= 0x1F000            # emoji and astral planes
+        ):
+            count += 1.0
+        elif cp < 0x7F:
+            count += 0.25
+        else:
+            count += 0.5
+    return max(1, math.ceil(count))
 
 
 def split_sentences(text: str) -> List[str]:
