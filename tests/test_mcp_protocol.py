@@ -281,3 +281,19 @@ def test_initialize_falls_back_for_unknown_version(tmp_path):
     assert completed.returncode == 0
     assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
 
+
+
+def test_tools_carry_annotations_and_titles(tmp_path):
+    completed, responses = _run(tmp_path, [_request(1, "initialize"), _request(2, "tools/list")])
+    tools = {t["name"]: t for t in responses[1]["result"]["tools"]}
+    for name in ("synapse_recall", "synapse_retain", "synapse_record_episode", "synapse_get_stats"):
+        assert "title" in tools[name] and isinstance(tools[name]["title"], str)
+        ann = tools[name]["annotations"]
+        assert isinstance(ann, dict)
+        for key in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+            assert isinstance(ann[key], bool)
+    assert tools["synapse_recall"]["annotations"]["readOnlyHint"] is True
+    assert tools["synapse_retain"]["annotations"]["readOnlyHint"] is False
+    assert tools["synapse_retain"]["annotations"]["destructiveHint"] is True
+    assert tools["synapse_get_stats"]["annotations"]["readOnlyHint"] is True
+

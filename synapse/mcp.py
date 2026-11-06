@@ -95,7 +95,14 @@ def _configure_logging() -> None:
 TOOLS = [
     {
         "name": "synapse_recall",
+        "title": "Recall Memories",
         "description": "Recall memories, SOPs, and past architectural decisions from Synapse Memory Engine using hybrid semantic vector and BM25 search.",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False
+        },
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -114,7 +121,14 @@ TOOLS = [
     },
     {
         "name": "synapse_retain",
+        "title": "Retain Memory",
         "description": "Save an atomic fact, architectural decision, permanent directive, or SOP into Synapse Memory.",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": False
+        },
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -139,7 +153,14 @@ TOOLS = [
     },
     {
         "name": "synapse_record_episode",
+        "title": "Record Episode",
         "description": "Record an episodic learning memory (Situation -> Action -> Outcome -> Lesson) so agents never repeat past mistakes.",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": False
+        },
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -174,7 +195,14 @@ TOOLS = [
     },
     {
         "name": "synapse_get_stats",
+        "title": "Memory Stats",
         "description": "Get real-time statistics and node counts of the Synapse memory cortex.",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False
+        },
         "inputSchema": {
             "type": "object",
             "properties": {}
