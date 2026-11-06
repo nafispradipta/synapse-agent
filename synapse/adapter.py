@@ -352,7 +352,7 @@ class SynapseAdapter(BaseMemoryAdapter):
                         include_episodes=kwargs.get("include_episodes", True),
                     )
             except Exception as e:
-                logger.debug("Retriever query failed: %s", e, exc_info=True)
+                logger.warning("Retriever query failed for %r: %s", query, e, exc_info=True)
                 nodes = []
 
         if not nodes and not mental_model_snippets and not observation_snippets:

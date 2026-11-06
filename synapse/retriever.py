@@ -28,6 +28,15 @@ def _default_vector_dim() -> int:
     return _ST_NATIVE_DIM
 
 
+def _as_float(value: Any, default: float) -> float:
+    """Coerce a stored score to float, tolerating NULL and non-finite legacy rows."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return number if math.isfinite(number) else float(default)
+
+
 OPPOSING_PATTERNS: List[Tuple[re.Pattern[str], re.Pattern[str]]] = [
     (
         re.compile(r"\b(prefer|always|enable|use|adopt|active|true|light|tabs|allow|permit|yes|direct|wajib|harus|pakai|gunakan|boleh)\b", re.IGNORECASE),
@@ -877,11 +886,11 @@ class SynapseRetriever:
             recency_decay = 0.5 ** (delta_t / self.half_life_seconds)
 
             # Strength weighting
-            node_strength = float(node.get("strength", 1.0))
+            node_strength = _as_float(node.get("strength"), 1.0)
             recency_score = min(1.0, max(0.0, recency_decay * (node_strength / 1.0)))
 
             # Importance multiplier (0.5 default = 1.0x factor)
-            importance = float(node.get("importance", 0.5))
+            importance = _as_float(node.get("importance"), 0.5)
             importance_scale = importance / 0.5
 
             norm_bm25 = normalized_bm25.get(node_id, 0.0)
@@ -910,8 +919,8 @@ class SynapseRetriever:
                 elif node_sim < 0.15:
                     base_score *= 0.70
 
-            salience = float(node.get("salience", 0.5))
-            confidence = float(node.get("confidence", 1.0))
+            salience = _as_float(node.get("salience"), 0.5)
+            confidence = _as_float(node.get("confidence"), 1.0)
 
             salience_factor = salience / 0.5
             confidence_factor = max(0.1, confidence)
@@ -950,8 +959,8 @@ class SynapseRetriever:
                     ep_delta_t = max(0, now - ep_last_accessed)
                     ep_recency_score = min(1.0, max(0.0, 0.5 ** (ep_delta_t / self.half_life_seconds)))
 
-                    ep_salience = float(ep.get("salience", 0.5))
-                    ep_confidence = float(ep.get("confidence", 1.0))
+                    ep_salience = _as_float(ep.get("salience"), 0.5)
+                    ep_confidence = _as_float(ep.get("confidence"), 1.0)
 
                     ep_base_score = (
                         (ep_norm_bm25 * self.bm25_weight)
@@ -1035,10 +1044,10 @@ class SynapseRetriever:
         # Sort descending by composite score, then by salience, recency and strength
         candidates.sort(
             key=lambda x: (
-                x.get("composite_score", 0.0),
-                x.get("salience", 0.5),
-                x.get("recency_score", 0.0),
-                x.get("strength", 1.0),
+                _as_float(x.get("composite_score"), 0.0),
+                _as_float(x.get("salience"), 0.5),
+                _as_float(x.get("recency_score"), 0.0),
+                _as_float(x.get("strength"), 1.0),
             ),
             reverse=True,
         )
@@ -1056,8 +1065,8 @@ class SynapseRetriever:
                     )
                     item["last_accessed"] = now
                 else:
-                    curr_str = float(item.get("strength", 1.0))
-                    curr_sal = float(item.get("salience", 0.5))
+                    curr_str = _as_float(item.get("strength"), 1.0)
+                    curr_sal = _as_float(item.get("salience"), 0.5)
                     reinforced_str = round(min(5.0, curr_str + 0.1), 3)
                     reinforced_sal = round(min(1.0, curr_sal + 0.02), 3)
 

@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from synapse.storage import SynapseStorage
 from synapse.retriever import SynapseRetriever
 from synapse.loader import SynapseContextLoader, estimate_tokens, split_sentences
+from synapse.adapter import SynapseAdapter
 
 
 @pytest.fixture
@@ -426,4 +427,44 @@ class TestTrueHybridRRFAndLockSafety:
 
         retriever.retrieve("PostgreSQL database preference", limit=5, touch=True)
         assert mem_storage.get_node(n2)["status"] == "active"
+
+
+
+def test_retrieve_tolerates_legacy_null_scores(tmp_path):
+    # Simulate rows written by older releases / external tooling.
+    storage = SynapseStorage(str(tmp_path / "legacy.db"))
+    node_id = storage.add_node(
+        uri="synapse://general/legacy-null",
+        l0_abstract="legacy null scores",
+        category="general",
+        salience=0.5,
+        importance=0.5,
+        confidence=1.0,
+    )
+    with storage._lock:
+        storage._conn.execute(
+            "UPDATE synapse_nodes SET salience = NULL, importance = NULL, "
+            "confidence = NULL, strength = NULL WHERE id = ?",
+            (node_id,),
+        )
+        storage._conn.commit()
+
+    retriever = SynapseRetriever(storage=storage)
+    results = retriever.retrieve("legacy null scores", limit=3, touch=False)
+    assert results, "NULL legacy fields must not break retrieval"
+    assert results[0]["salience"] == 0.5
+    storage.close()
+
+
+def test_recall_logs_retrieval_failure(caplog):
+    adapter = SynapseAdapter({"db_path": ":memory:"})
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    adapter.retriever.retrieve = _boom
+    with caplog.at_level("WARNING", logger="synapse.adapter"):
+        assert adapter.recall("anything") == []
+    assert any("Retriever query failed" in r.getMessage() for r in caplog.records)
+    adapter.storage.close()
 
