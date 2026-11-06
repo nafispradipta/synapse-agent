@@ -40,3 +40,7 @@ graphify-out/
 
 # Local Environment Secrets
 .env
+
+# Local superpowers workspaces and plan docs
+.superpowers/
+docs/superpowers/
