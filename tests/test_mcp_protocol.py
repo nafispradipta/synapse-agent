@@ -68,7 +68,7 @@ def test_initialize_tools_and_metadata(tmp_path):
     assert [r["id"] for r in responses] == [1, 2, 3]
 
     init = responses[0]["result"]
-    assert init["protocolVersion"] == "2024-11-05"
+    assert init["protocolVersion"] == "2025-06-18"
     assert init["serverInfo"]["name"] == "synapse-cortex"
 
     version_line = re.search(
@@ -256,4 +256,28 @@ def test_budget_is_clamped_not_crashing(tmp_path, budget):
     )
     assert completed.returncode == 0
     assert "isError" not in responses[1].get("result", {})
+
+
+
+def test_default_protocol_version_is_2025_06_18(tmp_path):
+    completed, responses = _run(tmp_path, [_request(1, "initialize")])
+    assert completed.returncode == 0
+    assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
+
+
+@pytest.mark.parametrize("requested", ["2024-11-05", "2025-03-26"])
+def test_initialize_echoes_supported_requested_version(tmp_path, requested):
+    completed, responses = _run(
+        tmp_path, [_request(1, "initialize", {"protocolVersion": requested})]
+    )
+    assert completed.returncode == 0
+    assert responses[0]["result"]["protocolVersion"] == requested
+
+
+def test_initialize_falls_back_for_unknown_version(tmp_path):
+    completed, responses = _run(
+        tmp_path, [_request(1, "initialize", {"protocolVersion": "1999-01-01"})]
+    )
+    assert completed.returncode == 0
+    assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
 

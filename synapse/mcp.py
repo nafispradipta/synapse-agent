@@ -46,6 +46,9 @@ def _package_version() -> str:
 
 SERVER_VERSION = _package_version()
 
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
+DEFAULT_PROTOCOL_VERSION = "2025-06-18"
+
 from synapse.adapter import SynapseAdapter
 from synapse.stores.constants import VALID_CATEGORIES
 
@@ -409,13 +412,18 @@ def dispatch(req: Any) -> Optional[Dict[str, Any]]:
         return _error(req_id, -32602, "Invalid params")
 
     if method == "initialize":
+        requested = params.get("protocolVersion") if isinstance(params, dict) else None
+        if requested in SUPPORTED_PROTOCOL_VERSIONS:
+            negotiated = requested
+        else:
+            negotiated = DEFAULT_PROTOCOL_VERSION
         response = {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": negotiated,
                 "capabilities": {
-                    "tools": {}
+                    "tools": {"listChanged": False}
                 },
                 "serverInfo": {
                     "name": "synapse-cortex",
