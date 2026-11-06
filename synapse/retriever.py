@@ -99,10 +99,10 @@ def detect_contradictions(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     break
 
             if is_conflict:
-                sal_a = float(a.get("salience", 0.5))
-                sal_b = float(b.get("salience", 0.5))
-                conf_a = float(a.get("confidence", 1.0))
-                conf_b = float(b.get("confidence", 1.0))
+                sal_a = _as_float(a.get("salience"), 0.5)
+                sal_b = _as_float(b.get("salience"), 0.5)
+                conf_a = _as_float(a.get("confidence"), 1.0)
+                conf_b = _as_float(b.get("confidence"), 1.0)
 
                 if sal_a > sal_b:
                     winner_id = a.get("id")
@@ -807,7 +807,7 @@ class SynapseRetriever:
                         if known_nodes[neighbor_id].get("status") != "active":
                             continue
 
-                    edge_weight = float(edge.get("weight", 0.5))
+                    edge_weight = _as_float(edge.get("weight"), 0.5)
                     # Temporal Spreading Activation: boost causal timeline transitions
                     rel_type = str(edge.get("relation", "")).lower()
                     temporal_multiplier = 1.0

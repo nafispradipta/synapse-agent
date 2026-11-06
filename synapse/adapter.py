@@ -631,7 +631,12 @@ class SynapseAdapter(BaseMemoryAdapter):
             else:
                 index_dir = target_dir
 
-            index_file = self._contained_dir(vault_base, index_dir) / f"{domain_index}.md"
+            try:
+                index_dir = self._contained_dir(vault_base, index_dir)
+            except (TypeError, ValueError):
+                index_dir = vault_base / "projects" / "synapse-knowledge"
+
+            index_file = index_dir / f"{domain_index}.md"
             wikilink = f"[[{slug}]]"
 
             if index_file.exists():
@@ -653,6 +658,7 @@ class SynapseAdapter(BaseMemoryAdapter):
                     index_file.write_text(new_text, encoding="utf-8")
                     logger.info("Updated index %s with link %s", index_file, wikilink)
             else:
+                index_dir = self._contained_dir(vault_base, index_dir)
                 index_dir.mkdir(parents=True, exist_ok=True)
                 initial_index = (
                     f"# {domain_index}\n\n"

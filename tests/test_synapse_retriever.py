@@ -468,3 +468,59 @@ def test_recall_logs_retrieval_failure(caplog):
     assert any("Retriever query failed" in r.getMessage() for r in caplog.records)
     adapter.storage.close()
 
+
+
+def test_retrieve_tolerates_legacy_null_edge_weight(tmp_path):
+    # Legacy rows / external tooling may store a NULL edge weight (NaN persisted as NULL).
+    storage = SynapseStorage(str(tmp_path / "legacy_edge.db"))
+    a = storage.add_node(
+        uri="synapse://general/edge-a",
+        l0_abstract="edge null weight a",
+        category="general",
+    )
+    b = storage.add_node(
+        uri="synapse://general/edge-b",
+        l0_abstract="edge null weight b",
+        category="general",
+    )
+    storage.add_edge(a, b, relation="relates")
+    with storage._lock:
+        storage._conn.execute(
+            "UPDATE synapse_edges SET weight = NULL WHERE source_id = ?",
+            (a,),
+        )
+        storage._conn.commit()
+
+    retriever = SynapseRetriever(storage=storage)
+    results = retriever.retrieve("edge null weight", limit=3)
+    assert results, "NULL edge weight must not break retrieval"
+    storage.close()
+
+
+def test_detect_contradictions_tolerates_legacy_null_scores(tmp_path):
+    storage = SynapseStorage(str(tmp_path / "legacy_conflict.db"))
+    a = storage.add_node(
+        uri="synapse://decision/conflict-a",
+        l0_abstract="Always use tabs for indentation.",
+        category="decision",
+    )
+    b = storage.add_node(
+        uri="synapse://decision/conflict-b",
+        l0_abstract="Avoid tabs, always use spaces.",
+        category="decision",
+    )
+    with storage._lock:
+        storage._conn.execute(
+            "UPDATE synapse_nodes SET salience = NULL, confidence = NULL "
+            "WHERE id IN (?, ?)",
+            (a, b),
+        )
+        storage._conn.commit()
+
+    retriever = SynapseRetriever(storage=storage)
+    conflicts = retriever.detect_contradictions(
+        [storage.get_node(a), storage.get_node(b)]
+    )
+    assert len(conflicts) == 1, "NULL scores must not break contradiction detection"
+    storage.close()
+

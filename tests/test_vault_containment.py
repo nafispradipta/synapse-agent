@@ -77,3 +77,20 @@ def test_windows_separator_vault_dir_metadata_is_contained(tmp_path):
     assert outside.exists() is False
     assert list(vault.rglob("*.md"))
 
+
+
+def test_update_domain_index_contains_target_dir_before_mkdir(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    adapter = SynapseAdapter({"db_path": ":memory:", "vault_path": str(vault)})
+    outside = tmp_path / "outside"
+    adapter._update_domain_index(
+        vault_base=vault,
+        target_dir=outside,
+        domain_index="00-INDEX-PROJECTS",
+        slug="probe",
+        title="Probe",
+    )
+    assert outside.exists() is False
+    inside = vault / "projects" / "synapse-knowledge" / "00-INDEX-PROJECTS.md"
+    assert inside.exists(), "index must be written inside the vault"
