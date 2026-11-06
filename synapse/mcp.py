@@ -305,12 +305,12 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 msg = "Failed to retain in Synapse Memory (storage unavailable or write rejected)."
                 return {
                     "content": [{"type": "text", "text": msg}],
-                    "structuredContent": {"ok": False, "id": None},
+                    "structuredContent": {"ok": False},
                     "isError": True
                 }
             return {
                 "content": [{"type": "text", "text": "Successfully retained in Synapse Memory: True"}],
-                "structuredContent": {"ok": True, "id": res if isinstance(res, str) else None}
+                "structuredContent": {"ok": True}
             }
 
         elif name == "synapse_record_episode":
@@ -370,12 +370,12 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 msg = "Failed to record episode in Synapse."
                 return {
                     "content": [{"type": "text", "text": msg}],
-                    "structuredContent": {"ok": False, "id": None},
+                    "structuredContent": {"ok": False},
                     "isError": True
                 }
             return {
                 "content": [{"type": "text", "text": f"Successfully recorded episode in Synapse: {res}"}],
-                "structuredContent": {"ok": True, "id": res if isinstance(res, str) else None}
+                "structuredContent": {"ok": True}
             }
 
         elif name == "synapse_get_stats":
@@ -461,7 +461,7 @@ def dispatch(req: Any) -> Optional[Dict[str, Any]]:
 
     if method == "initialize":
         requested = params.get("protocolVersion") if isinstance(params, dict) else None
-        if requested in SUPPORTED_PROTOCOL_VERSIONS:
+        if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS:
             negotiated = requested
         else:
             negotiated = DEFAULT_PROTOCOL_VERSION

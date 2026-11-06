@@ -323,3 +323,25 @@ def test_error_result_has_structured_content(tmp_path):
     assert "structuredContent" in result
     assert "error" in result["structuredContent"]
 
+
+
+def test_retain_success_structured_content_has_no_null_id(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": "probe fact", "category": "general"}),
+        ],
+    )
+    assert completed.returncode == 0
+    result = responses[1]["result"]
+    assert result["structuredContent"] == {"ok": True}
+
+
+def test_protocol_version_non_string_falls_back(tmp_path):
+    completed, responses = _run(
+        tmp_path, [_request(1, "initialize", {"protocolVersion": 2025})]
+    )
+    assert completed.returncode == 0
+    assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
+
