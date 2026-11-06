@@ -55,3 +55,25 @@ def test_frontmatter_quotes_and_newlines_are_escaped(tmp_path):
     # Unbalanced unescaped quotes would break the YAML scalar: every inner
     # quote must be escaped as \\", leaving exactly the outer pair unescaped.
     assert title_line.count('"') - title_line.count('\\"') == 2
+
+
+def test_vault_dir_metadata_cannot_create_directories_outside_vault(tmp_path):
+    vault = _retain_with_metadata(tmp_path, vault_dir="../../escaped_dir")
+    assert (tmp_path / "escaped_dir").exists() is False
+    assert (tmp_path.parent / "escaped_dir").exists() is False
+    assert list(vault.rglob("*.md"))
+
+
+def test_absolute_vault_dir_metadata_is_contained(tmp_path):
+    outside = tmp_path.parent / "abs_escape"
+    vault = _retain_with_metadata(tmp_path, vault_dir=str(outside))
+    assert outside.exists() is False
+    assert list(vault.rglob("*.md"))
+
+
+def test_windows_separator_vault_dir_metadata_is_contained(tmp_path):
+    outside = tmp_path.parent / "win_escape"
+    vault = _retain_with_metadata(tmp_path, vault_dir="..\\..\\win_escape")
+    assert outside.exists() is False
+    assert list(vault.rglob("*.md"))
+

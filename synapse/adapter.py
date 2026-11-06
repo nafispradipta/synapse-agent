@@ -502,6 +502,18 @@ class SynapseAdapter(BaseMemoryAdapter):
         except Exception:
             return default_tags
 
+    @staticmethod
+    def _contained_dir(vault_base: Path, candidate: Path) -> Path:
+        """Resolve a vault subdirectory, falling back when it escapes the vault."""
+        base = Path(vault_base).resolve()
+        resolved = Path(candidate).resolve()
+        try:
+            resolved.relative_to(base)
+            return resolved
+        except ValueError:
+            logger.warning("Vault target %s escapes the vault; using the default folder", resolved)
+            return base / "projects" / "synapse-knowledge"
+
     def _resolve_vault_target(
         self,
         vault_base: Path,
@@ -524,12 +536,12 @@ class SynapseAdapter(BaseMemoryAdapter):
             idx_name = rule.get("index", f"00-INDEX-{folder_name.upper()}")
             title = rule.get("title", folder_name.title())
             base_tags = rule.get("tags", [category])
-            return vault_base / folder_name, idx_name, title, base_tags
+            return self._contained_dir(vault_base, vault_base / folder_name), idx_name, title, base_tags
 
         # 1. Explicit vault directory in metadata
         custom_dir = metadata.get("vault_dir") or metadata.get("folder")
         if custom_dir:
-            target_dir = (vault_base / custom_dir).resolve()
+            target_dir = self._contained_dir(vault_base, vault_base / custom_dir)
             if "server" in str(target_dir):
                 return target_dir, "00-INDEX-SERVER", "Server & DevOps", ["server", "devops"]
             if "cybersecurity" in str(target_dir):
@@ -619,7 +631,7 @@ class SynapseAdapter(BaseMemoryAdapter):
             else:
                 index_dir = target_dir
 
-            index_file = index_dir / f"{domain_index}.md"
+            index_file = self._contained_dir(vault_base, index_dir) / f"{domain_index}.md"
             wikilink = f"[[{slug}]]"
 
             if index_file.exists():
