@@ -297,3 +297,29 @@ def test_tools_carry_annotations_and_titles(tmp_path):
     assert tools["synapse_retain"]["annotations"]["destructiveHint"] is True
     assert tools["synapse_get_stats"]["annotations"]["readOnlyHint"] is True
 
+
+
+def test_recall_result_has_structured_content(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": "probe fact", "category": "general"}),
+            _call(3, "synapse_recall", {"query": "probe"}),
+        ],
+    )
+    assert completed.returncode == 0
+    result = responses[2]["result"]
+    assert "structuredContent" in result
+    assert isinstance(result["structuredContent"].get("results"), list)
+
+
+def test_error_result_has_structured_content(tmp_path):
+    completed, responses = _run(
+        tmp_path, [_request(1, "initialize"), _call(2, "synapse_retain", {"content": ""})]
+    )
+    result = responses[1]["result"]
+    assert result.get("isError") is True
+    assert "structuredContent" in result
+    assert "error" in result["structuredContent"]
+

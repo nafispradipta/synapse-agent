@@ -217,6 +217,7 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if name not in _TOOL_NAMES:
         return {
             "content": [{"type": "text", "text": f"Unknown tool: {name}"}],
+            "structuredContent": {"error": f"Unknown tool: {name}"},
             "isError": True
         }
 
@@ -225,96 +226,107 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if name == "synapse_recall":
             query = arguments.get("query", "")
             if not isinstance(query, str) or not query.strip():
+                msg = "'query' must be a non-empty string."
                 return {
-                    "content": [{"type": "text", "text": "'query' must be a non-empty string."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             if len(query) > MAX_QUERY_CHARS:
+                msg = f"'query' exceeds the maximum length of {MAX_QUERY_CHARS} characters."
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": f"'query' exceeds the maximum length of {MAX_QUERY_CHARS} characters."
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             try:
                 budget = int(arguments.get("budget", 300))
             except (TypeError, ValueError):
+                msg = "'budget' must be an integer."
                 return {
-                    "content": [{"type": "text", "text": "'budget' must be an integer."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             budget = max(MIN_BUDGET, min(MAX_BUDGET, budget))
             results = adapter.recall(query, budget=budget)
             if not results:
+                msg = f"No relevant memories found for: '{query}'"
                 return {
-                    "content": [{"type": "text", "text": f"No relevant memories found for: '{query}'"}]
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"results": []}
                 }
             if isinstance(results, list):
                 text_out = "\n\n".join(str(r) for r in results)
+                structured = {"results": results}
             else:
                 text_out = str(results)
+                structured = {"results": [results]}
             return {
-                "content": [{"type": "text", "text": text_out}]
+                "content": [{"type": "text", "text": text_out}],
+                "structuredContent": structured
             }
 
         elif name == "synapse_retain":
             content = arguments.get("content", "")
             if not isinstance(content, str) or not content.strip():
+                msg = "'content' must be a non-empty string."
                 return {
-                    "content": [{"type": "text", "text": "'content' must be a non-empty string."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             if len(content) > MAX_CONTENT_CHARS:
+                msg = f"'content' exceeds the maximum length of {MAX_CONTENT_CHARS} characters."
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": f"'content' exceeds the maximum length of {MAX_CONTENT_CHARS} characters."
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             category = arguments.get("category", "decision")
             if category not in VALID_CATEGORIES:
+                msg = f"'category' must be one of: {sorted(VALID_CATEGORIES)}"
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": f"'category' must be one of: {sorted(VALID_CATEGORIES)}"
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             try:
                 salience = _validate_salience(arguments.get("salience", 0.8))
             except (TypeError, ValueError):
+                msg = "'salience' must be a finite number between 0.0 and 1.0."
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": "'salience' must be a finite number between 0.0 and 1.0."
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             res = adapter.retain(content, category=category, salience=salience)
             if res is not True:
+                msg = "Failed to retain in Synapse Memory (storage unavailable or write rejected)."
                 return {
-                    "content": [{"type": "text", "text": "Failed to retain in Synapse Memory (storage unavailable or write rejected)."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"ok": False, "id": None},
                     "isError": True
                 }
             return {
-                "content": [{"type": "text", "text": "Successfully retained in Synapse Memory: True"}]
+                "content": [{"type": "text", "text": "Successfully retained in Synapse Memory: True"}],
+                "structuredContent": {"ok": True, "id": res if isinstance(res, str) else None}
             }
 
         elif name == "synapse_record_episode":
             title = arguments.get("title", "")
             if not isinstance(title, str) or not title.strip():
+                msg = "'title' must be a non-empty string."
                 return {
-                    "content": [{"type": "text", "text": "'title' must be a non-empty string."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             if len(title) > MAX_EPISODE_FIELD_CHARS:
+                msg = f"'title' exceeds the maximum length of {MAX_EPISODE_FIELD_CHARS} characters."
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": f"'title' exceeds the maximum length of {MAX_EPISODE_FIELD_CHARS} characters."
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             situation = arguments.get("situation", "")
@@ -328,24 +340,22 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 ("lessons_learned", lessons),
             ):
                 if not isinstance(field_value, str) or len(field_value) > MAX_EPISODE_FIELD_CHARS:
+                    msg = (
+                        f"'{field_name}' must be a string of at most "
+                        f"{MAX_EPISODE_FIELD_CHARS} characters."
+                    )
                     return {
-                        "content": [{
-                            "type": "text",
-                            "text": (
-                                f"'{field_name}' must be a string of at most "
-                                f"{MAX_EPISODE_FIELD_CHARS} characters."
-                            )
-                        }],
+                        "content": [{"type": "text", "text": msg}],
+                        "structuredContent": {"error": msg},
                         "isError": True
                     }
             try:
                 salience = _validate_salience(arguments.get("salience", 0.9))
             except (TypeError, ValueError):
+                msg = "'salience' must be a finite number between 0.0 and 1.0."
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": "'salience' must be a finite number between 0.0 and 1.0."
-                    }],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             res = adapter.record_episode(
@@ -357,35 +367,45 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 salience=salience
             )
             if not res:
+                msg = "Failed to record episode in Synapse."
                 return {
-                    "content": [{"type": "text", "text": "Failed to record episode in Synapse."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"ok": False, "id": None},
                     "isError": True
                 }
             return {
-                "content": [{"type": "text", "text": f"Successfully recorded episode in Synapse: {res}"}]
+                "content": [{"type": "text", "text": f"Successfully recorded episode in Synapse: {res}"}],
+                "structuredContent": {"ok": True, "id": res if isinstance(res, str) else None}
             }
 
         elif name == "synapse_get_stats":
             if adapter.storage is None:
+                msg = "Synapse storage is unavailable."
                 return {
-                    "content": [{"type": "text", "text": "Synapse storage is unavailable."}],
+                    "content": [{"type": "text", "text": msg}],
+                    "structuredContent": {"error": msg},
                     "isError": True
                 }
             stats = adapter.storage.get_stats()
             return {
-                "content": [{"type": "text", "text": json.dumps(stats, indent=2)}]
+                "content": [{"type": "text", "text": json.dumps(stats, indent=2)}],
+                "structuredContent": {"stats": stats}
             }
 
         else:
+            msg = f"Unknown tool: {name}"
             return {
-                "content": [{"type": "text", "text": f"Unknown tool: {name}"}],
+                "content": [{"type": "text", "text": msg}],
+                "structuredContent": {"error": msg},
                 "isError": True
             }
 
     except Exception as e:
         logger.error("Error executing tool %s: %s", name, e, exc_info=True)
+        msg = f"Error executing {name}: internal error"
         return {
-            "content": [{"type": "text", "text": f"Error executing {name}: internal error"}],
+            "content": [{"type": "text", "text": msg}],
+            "structuredContent": {"error": msg},
             "isError": True
         }
 
