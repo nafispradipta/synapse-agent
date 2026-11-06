@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-06
+
+### Fixed
+- Non-finite scores (NaN/inf) are rejected at the storage write boundary and
+  numeric fields are clamped to their valid ranges, so one malformed write can
+  no longer turn recall into a silent empty result.
+- Retrieval tolerates NULL legacy score columns and logs failures at warning
+  level instead of debug.
+- MCP tools enforce content, query, episode and budget limits, validate salience
+  and category, and return a generic message instead of raw exception text.
+- The harvester accepts only http(s) URLs and rejects userinfo-spoofed hosts.
+- Vault writeback contains every target directory, including `vault_dir`
+  metadata and `vault_routes` folders, before creating it.
+
 ## [1.1.0] - 2026-11-04
 
 ### Fixed
