@@ -345,3 +345,41 @@ def test_protocol_version_non_string_falls_back(tmp_path):
     assert completed.returncode == 0
     assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
 
+
+
+def test_structured_content_on_all_paths(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": "probe fact", "category": "general"}),
+            _call(3, "synapse_record_episode", {
+                "title": "t", "situation": "s", "action_taken": "a",
+                "outcome": "o", "lessons_learned": "l"
+            }),
+            _call(4, "synapse_get_stats", {}),
+            _call(5, "synapse_retain", {"content": ""}),
+            _call(6, "synapse_retain", {"content": "x", "category": "nope"}),
+        ],
+    )
+    assert completed.returncode == 0
+    # retain success
+    assert responses[1]["result"]["structuredContent"] == {"ok": True}
+    # record_episode success
+    assert responses[2]["result"]["structuredContent"].get("ok") is True
+    # get_stats success
+    assert "stats" in responses[3]["result"]["structuredContent"]
+    # empty content error
+    assert "error" in responses[4]["result"]["structuredContent"]
+    # bad category error
+    assert "error" in responses[5]["result"]["structuredContent"]
+
+
+def test_unknown_tool_has_structured_content(tmp_path):
+    completed, responses = _run(
+        tmp_path, [_request(1, "initialize"), _call(2, "nope_tool", {})]
+    )
+    result = responses[1]["result"]
+    assert result.get("isError") is True
+    assert "error" in result["structuredContent"]
+
