@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
@@ -202,3 +204,56 @@ def test_error_code_matrix(tmp_path):
     assert [r["id"] for r in responses] == [1, 3, 4]
     assert responses[1]["error"]["code"] == -32602
     assert responses[2]["result"] == {}
+
+
+def test_nan_salience_is_rejected(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": "probe", "salience": float("nan")}),
+            _call(3, "synapse_recall", {"query": "probe"}),
+        ],
+    )
+    assert completed.returncode == 0
+    assert responses[1]["result"]["isError"] is True
+    # The rejected write must not land: the probe is absent from recall.
+    assert "No relevant memories" in json.dumps(responses[2]["result"])
+
+
+def test_content_at_the_cap_is_accepted(tmp_path):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": "x" * 100_000}),
+        ],
+    )
+    assert "isError" not in responses[1].get("result", {})
+
+
+def test_oversized_content_is_rejected(tmp_path):
+    big = "x" * 100_001
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_retain", {"content": big}),
+        ],
+    )
+    assert responses[1]["result"]["isError"] is True
+    assert "100000" in responses[1]["result"]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("budget", [0, -5, 10**12])
+def test_budget_is_clamped_not_crashing(tmp_path, budget):
+    completed, responses = _run(
+        tmp_path,
+        [
+            _request(1, "initialize"),
+            _call(2, "synapse_recall", {"query": "x", "budget": budget}),
+        ],
+    )
+    assert completed.returncode == 0
+    assert "isError" not in responses[1].get("result", {})
+

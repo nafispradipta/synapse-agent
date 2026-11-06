@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -49,6 +50,20 @@ from synapse.adapter import SynapseAdapter
 from synapse.stores.constants import VALID_CATEGORIES
 
 _adapter: Optional[SynapseAdapter] = None
+
+MAX_CONTENT_CHARS = 100_000
+MAX_QUERY_CHARS = 4_000
+MAX_EPISODE_FIELD_CHARS = 20_000
+MIN_BUDGET = 1
+MAX_BUDGET = 8_000
+
+
+def _validate_salience(value: Any) -> float:
+    """Accept only finite salience scores inside the documented [0, 1] range."""
+    number = float(value)
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise ValueError("salience must be a finite number between 0.0 and 1.0")
+    return number
 
 
 def _resolve_db_path() -> str:
@@ -164,8 +179,16 @@ TOOLS = [
     }
 ]
 
+_TOOL_NAMES = {tool["name"] for tool in TOOLS}
+
 
 def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    if name not in _TOOL_NAMES:
+        return {
+            "content": [{"type": "text", "text": f"Unknown tool: {name}"}],
+            "isError": True
+        }
+
     adapter = get_adapter()
     try:
         if name == "synapse_recall":
@@ -175,6 +198,14 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                     "content": [{"type": "text", "text": "'query' must be a non-empty string."}],
                     "isError": True
                 }
+            if len(query) > MAX_QUERY_CHARS:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"'query' exceeds the maximum length of {MAX_QUERY_CHARS} characters."
+                    }],
+                    "isError": True
+                }
             try:
                 budget = int(arguments.get("budget", 300))
             except (TypeError, ValueError):
@@ -182,6 +213,7 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                     "content": [{"type": "text", "text": "'budget' must be an integer."}],
                     "isError": True
                 }
+            budget = max(MIN_BUDGET, min(MAX_BUDGET, budget))
             results = adapter.recall(query, budget=budget)
             if not results:
                 return {
@@ -202,8 +234,33 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                     "content": [{"type": "text", "text": "'content' must be a non-empty string."}],
                     "isError": True
                 }
+            if len(content) > MAX_CONTENT_CHARS:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"'content' exceeds the maximum length of {MAX_CONTENT_CHARS} characters."
+                    }],
+                    "isError": True
+                }
             category = arguments.get("category", "decision")
-            salience = float(arguments.get("salience", 0.8))
+            if category not in VALID_CATEGORIES:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"'category' must be one of: {sorted(VALID_CATEGORIES)}"
+                    }],
+                    "isError": True
+                }
+            try:
+                salience = _validate_salience(arguments.get("salience", 0.8))
+            except (TypeError, ValueError):
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": "'salience' must be a finite number between 0.0 and 1.0."
+                    }],
+                    "isError": True
+                }
             res = adapter.retain(content, category=category, salience=salience)
             if res is not True:
                 return {
@@ -225,7 +282,33 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             action_taken = arguments.get("action_taken", "")
             outcome = arguments.get("outcome", "")
             lessons = arguments.get("lessons_learned", "")
-            salience = float(arguments.get("salience", 0.9))
+            for field_name, field_value in (
+                ("situation", situation),
+                ("action_taken", action_taken),
+                ("outcome", outcome),
+                ("lessons_learned", lessons),
+            ):
+                if not isinstance(field_value, str) or len(field_value) > MAX_EPISODE_FIELD_CHARS:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": (
+                                f"'{field_name}' must be a string of at most "
+                                f"{MAX_EPISODE_FIELD_CHARS} characters."
+                            )
+                        }],
+                        "isError": True
+                    }
+            try:
+                salience = _validate_salience(arguments.get("salience", 0.9))
+            except (TypeError, ValueError):
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": "'salience' must be a finite number between 0.0 and 1.0."
+                    }],
+                    "isError": True
+                }
             res = adapter.record_episode(
                 title=title,
                 situation=situation,
@@ -263,7 +346,7 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.error("Error executing tool %s: %s", name, e, exc_info=True)
         return {
-            "content": [{"type": "text", "text": f"Error executing {name}: {str(e)}"}],
+            "content": [{"type": "text", "text": f"Error executing {name}: internal error"}],
             "isError": True
         }
 
