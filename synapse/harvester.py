@@ -84,12 +84,15 @@ class SynapseWebHarvester:
         self.vault_dir.mkdir(parents=True, exist_ok=True)
 
     def is_domain_allowed(self, url: str) -> bool:
-        """Verify URL domain against strict whitelist."""
+        """Verify URL domain against strict whitelist over http(s) only."""
         try:
             parsed = urllib.parse.urlparse(url)
-            domain = parsed.netloc.lower()
-            if ":" in domain:
-                domain = domain.split(":")[0]
+            if parsed.scheme.lower() not in ("http", "https"):
+                return False
+            netloc = parsed.netloc.lower()
+            if "@" in netloc:
+                return False
+            domain = netloc.split(":")[0]
             for allowed in self.domains:
                 if domain == allowed or domain.endswith("." + allowed):
                     return True

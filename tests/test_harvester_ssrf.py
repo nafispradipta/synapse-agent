@@ -79,3 +79,18 @@ def test_redirect_to_whitelisted_host_is_allowed(server, harvester):
 def test_oversized_body_is_rejected(server, harvester):
     url = f"http://localhost:{server.server_address[1]}/big"
     assert harvester.fetch_url_text(url, timeout=10) is None
+
+
+def test_file_scheme_is_blocked_even_for_whitelisted_host(harvester):
+    assert harvester.is_domain_allowed("file://localhost/etc/passwd") is False
+    assert harvester.fetch_url_text("file://localhost/etc/passwd") is None
+
+
+def test_non_http_schemes_are_blocked(harvester):
+    assert harvester.is_domain_allowed("ftp://github.com/pub") is False
+    assert harvester.is_domain_allowed("FILE://LOCALHOST/etc/passwd") is False
+
+
+def test_userinfo_cannot_spoof_a_whitelisted_host(harvester):
+    assert harvester.is_domain_allowed("https://github.com@evil.example/") is False
+
