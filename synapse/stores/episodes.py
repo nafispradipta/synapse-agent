@@ -9,6 +9,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
+from synapse.stores.constants import bounded_unit
+
 
 class EpisodeStore:
     """Episodes, their full-text search, and consolidation candidates."""
@@ -54,8 +56,8 @@ class EpisodeStore:
                     action_taken or "",
                     outcome or "",
                     lessons_learned or "",
-                    float(salience),
-                    float(confidence),
+                    bounded_unit(salience),
+                    bounded_unit(confidence),
                     now,
                     now,
                     tags_str,
@@ -117,7 +119,7 @@ class EpisodeStore:
                 if k == "tags" and isinstance(v, list):
                     updates[k] = json.dumps(v)
                 elif k in ("salience", "confidence"):
-                    updates[k] = float(v)
+                    updates[k] = bounded_unit(v)
                 else:
                     updates[k] = v
 

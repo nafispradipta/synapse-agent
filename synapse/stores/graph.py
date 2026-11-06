@@ -10,7 +10,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from synapse.stores.constants import VALID_STATUSES
+from synapse.stores.constants import VALID_STATUSES, bounded_strength, bounded_unit
 
 
 class GraphStore:
@@ -68,13 +68,13 @@ class GraphStore:
                     l1_overview or "",
                     l2_target_path,
                     category,
-                    float(importance),
-                    float(strength),
+                    bounded_unit(importance),
+                    bounded_strength(strength),
                     created_ts,
                     created_ts,
                     status,
-                    float(salience),
-                    float(confidence),
+                    bounded_unit(salience),
+                    bounded_unit(confidence),
                     int(access_count),
                 ),
             )
@@ -233,7 +233,12 @@ class GraphStore:
                         raise ValueError("Category must be a non-empty string.")
                 if k == "status" and v not in VALID_STATUSES:
                     raise ValueError(f"Invalid status '{v}'. Allowed: {sorted(VALID_STATUSES)}")
-                updates[k] = v
+                if k in ("importance", "salience", "confidence"):
+                    updates[k] = bounded_unit(v)
+                elif k == "strength":
+                    updates[k] = bounded_strength(v)
+                else:
+                    updates[k] = v
 
         if not updates:
             return False

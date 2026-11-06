@@ -7,7 +7,8 @@ them without creating an import cycle back into ``synapse.storage``.
 
 from __future__ import annotations
 
-from typing import Set
+import math
+from typing import Any, Set
 
 try:
     import numpy as np
@@ -31,3 +32,23 @@ VALID_STATUSES: Set[str] = {
     "archived",
     "flagged",
 }
+
+
+def bounded_unit(value: Any, default: float = 0.5) -> float:
+    """Clamp a unit-interval score; reject non-finite or non-numeric input."""
+    if value is None:
+        return float(default)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"non-finite numeric value: {value!r}")
+    return max(0.0, min(1.0, number))
+
+
+def bounded_strength(value: Any, default: float = 1.0) -> float:
+    """Clamp a Hebbian strength score into ``[0.0, 5.0]``."""
+    if value is None:
+        return float(default)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"non-finite numeric value: {value!r}")
+    return max(0.0, min(5.0, number))
