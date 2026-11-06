@@ -37,6 +37,19 @@
 - Category and operational-status heuristics are bilingual (English + Indonesian) regexes. Use `\b` boundaries: substring matching caused real bugs (`mati` inside `otomatis`/`automatic`) and is regression-tested.
 - `scripts/nightly_consolidation.py` is env-configured (no CLI flags), exits 1 when the DB is missing, writes `logs/consolidation.log`, and shells out to optional scripts via hardcoded `/usr/bin/python3` (Linux-oriented). Its optional sub-scripts are not in the repo.
 
+## Workflow (superpowers)
+
+Every task goes through the superpowers skills; "it is simple" is not a reason to skip them.
+
+- New feature, behavior change, or design decision: `brainstorming` first, then `writing-plans`.
+- Any bug, test failure, or unexpected behavior: `systematic-debugging` before proposing a fix.
+- Any implementation work: `test-driven-development`, failing test first.
+- Executing a written plan: `executing-plans` inline, or `subagent-driven-development` for independent tasks.
+- Before claiming work is complete or committing: `verification-before-completion` with real command output.
+- Before merging: `requesting-code-review`; when acting on review feedback: `receiving-code-review`.
+
+Plans live in `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`. Track progress with per-task checkboxes, work test-first, and commit once per completed task. OpenCode invokes skills by bare id (`brainstorming`, not `superpowers:brainstorming`).
+
 ## Conventions
 
 - English-only code/docs, no emojis (`CONTRIBUTING.md`).
