@@ -1025,10 +1025,10 @@ class SynapseRetriever:
             try:
                 candidates.sort(
                     key=lambda x: (
-                        x.get("composite_score", 0.0),
-                        x.get("salience", 0.5),
-                        x.get("recency_score", 0.0),
-                        x.get("strength", 1.0),
+                        _as_float(x.get("composite_score"), 0.0),
+                        _as_float(x.get("salience"), 0.5),
+                        _as_float(x.get("recency_score"), 0.0),
+                        _as_float(x.get("strength"), 1.0),
                     ),
                     reverse=True,
                 )

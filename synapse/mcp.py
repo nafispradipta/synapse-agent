@@ -278,6 +278,14 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                     "content": [{"type": "text", "text": "'title' must be a non-empty string."}],
                     "isError": True
                 }
+            if len(title) > MAX_EPISODE_FIELD_CHARS:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"'title' exceeds the maximum length of {MAX_EPISODE_FIELD_CHARS} characters."
+                    }],
+                    "isError": True
+                }
             situation = arguments.get("situation", "")
             action_taken = arguments.get("action_taken", "")
             outcome = arguments.get("outcome", "")
