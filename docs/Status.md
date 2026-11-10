@@ -24,11 +24,10 @@ Last updated: 2026-11-10
 - Numeric boundary validation and rollback on failed writes.
 - Root `AGENTS.md` rewritten and `docs/` established as the documentation source of truth.
 - Stale test counts, `SECURITY.md` version support, and changelog ordering corrected.
-- Independent reviewer findings 1 to 19 addressed. Because the subagent tool hit a usage limit during the follow-up, the final pass was a self-review by the author; an independent review is still recommended before release.
+- Independent reviewer findings 1 to 19 addressed. A follow-up independent review (2026-11-10) completed: no blockers; storage, schema, and boundary rules intact; one flaky environment-dependent performance test confirmed passing on re-run; `.gitignore` change reverted as flagged.
 
 ## Open items
 
-- Independent review was requested but the subagent tool hit a usage limit. The final pass was a self-review; an independent review is still recommended before release.
 - The documentation link check is a manual procedure; no script is tracked in the repository.
 - `VectorStore.upsert_vector` is called without a `model` argument on the adapter retain path, so vector model provenance can be overwritten with `NULL`. This is a code fix candidate, not part of the documentation change.
 - `scripts/nightly_consolidation.py` remains Linux-oriented because it shells out through `/usr/bin/python3`.
@@ -40,10 +39,10 @@ None known.
 
 ## Next actions
 
-1. Run an independent review if possible; otherwise proceed with the self-review record above.
-2. Re-run `python -m pytest -q`, the quickstart smoke test, and the documentation link check.
-3. Record the outcome here and in the root `CHANGELOG.md`.
-4. Commit the documentation change locally. Do not push.
+1. Decide whether to fix `VectorStore.upsert_vector` model provenance (open item above) before release.
+2. Add a tracked documentation link-check script if desired.
+3. Release the `[Unreleased]` changelog section as a version when ready.
+4. Do not push; integration decisions belong to the repository owner.
 
 ## Verification commands
 
