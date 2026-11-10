@@ -259,7 +259,8 @@ class SynapseAdapter(BaseMemoryAdapter):
                     ep_text = f"{title} {situation} {action_taken} {outcome} {lessons_learned}".strip()
                     vector = embedder.embed(ep_text)
                     if vector:
-                        self.storage.upsert_vector(stored_id, vector)
+                        model = getattr(embedder, "model_name", None)
+                        self.storage.upsert_vector(stored_id, vector, model=model)
             except Exception as e:
                 logger.warning("In-flight vectorization failed for episode %s: %s", stored_id, e)
 
@@ -992,7 +993,8 @@ class SynapseAdapter(BaseMemoryAdapter):
                         embed_text = f"{l0} {l1}".strip() or content.strip()
                         vector = embedder.embed(embed_text)
                         if vector:
-                            self.storage.upsert_vector(stored_id, vector)
+                            model = getattr(embedder, "model_name", None)
+                            self.storage.upsert_vector(stored_id, vector, model=model)
                 except Exception as e:
                     logger.warning("In-flight vectorization failed for node %s: %s", stored_id, e)
 

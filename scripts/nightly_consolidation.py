@@ -225,7 +225,8 @@ def run_consolidation(
                             vec = fallback_vectorize(text_to_embed, dim=384)
 
                         if vec:
-                            storage.upsert_vector(effective_id, vec)
+                            model = getattr(_embedder, "model_name", None) if _embedder is not None else "crc32-ngram-fallback"
+                            storage.upsert_vector(effective_id, vec, model=model)
                     except Exception as ve:
                         log(f"Warning: Vector generation skipped for {effective_id}: {ve}")
 

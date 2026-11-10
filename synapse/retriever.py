@@ -358,7 +358,8 @@ class SynapseRetriever:
             return [0.0] * self.vector_dim
         text = f"{node.get('l0_abstract', '')} {node.get('l1_overview', '')}".strip()
         vec = self.vectorize(text)
-        self.storage.upsert_vector(node_id, vec)
+        model = getattr(self.embedder, "model_name", None)
+        self.storage.upsert_vector(node_id, vec, model=model)
         return vec
 
     def auto_index_missing_vectors(self) -> int:
@@ -369,7 +370,8 @@ class SynapseRetriever:
         for node in missing:
             text = f"{node.get('l0_abstract', '')} {node.get('l1_overview', '')}".strip()
             vec = self.vectorize(text)
-            self.storage.upsert_vector(node["id"], vec)
+            model = getattr(self.embedder, "model_name", None)
+            self.storage.upsert_vector(node["id"], vec, model=model)
             indexed_count += 1
         return indexed_count
 

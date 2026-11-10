@@ -29,7 +29,7 @@ Last updated: 2026-11-10
 ## Open items
 
 - The documentation link check is a manual procedure; no script is tracked in the repository.
-- `VectorStore.upsert_vector` is called without a `model` argument on the adapter retain path, so vector model provenance can be overwritten with `NULL`. This is a code fix candidate, not part of the documentation change.
+- (Fixed) `VectorStore.upsert_vector` now receives the embedder's `model_name` on adapter, retriever, and nightly-consolidation paths, so vector model provenance is recorded instead of `NULL`.
 - `scripts/nightly_consolidation.py` remains Linux-oriented because it shells out through `/usr/bin/python3`.
 - The `[Unreleased]` changelog section is not yet released as a version.
 
@@ -39,7 +39,7 @@ None known.
 
 ## Next actions
 
-1. Decide whether to fix `VectorStore.upsert_vector` model provenance (open item above) before release.
+1. (Done) Fixed `VectorStore.upsert_vector` model provenance across adapter, retriever, and nightly consolidation.
 2. Add a tracked documentation link-check script if desired.
 3. Release the `[Unreleased]` changelog section as a version when ready.
 4. Do not push; integration decisions belong to the repository owner.
