@@ -9,6 +9,7 @@ This directory is the single source of truth for how `synapse-cortex` is designe
 | [Architecture.md](Architecture.md) | Developers, maintainers | Modules, data flow, schema, retrieval weights, or optional engines change |
 | [Product.md](Product.md) | Maintainers, product owners | Scope, capabilities, non-goals, or user-facing limits change |
 | [Operations.md](Operations.md) | Operators, integrators | Install steps, environment variables, MCP setup, scripts, or troubleshooting change |
+| [Harness_Setup.md](Harness_Setup.md) | Operators, integrators | Harness detection, CLI setup, or per-client MCP configuration changes |
 | [Security_Privacy.md](Security_Privacy.md) | Maintainers, security reviewers | Trust boundaries, data handling, credentials, or a security fix changes |
 | [Status.md](Status.md) | Everyone | Every completed task, blocker, or change of focus |
 | [Roadmap.md](Roadmap.md) | Maintainers, users | A candidate is accepted, rejected, or completed |
