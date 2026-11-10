@@ -37,7 +37,9 @@ File: `%APPDATA%\Claude\claude_desktop_config.json` (Windows) /
 `~/.config/Claude/claude_desktop_config.json` (Linux).
 
 ### Claude Code
-File: `~/.claude.json` (user scope) or `.mcp.json` (project scope).
+File: `~/.claude.json` (user scope). Project scope (`.mcp.json`) is
+supported by Claude Code but not written by `synapse setup`; add it
+manually if needed.
 Or run: `claude mcp add synapse -- synapse-mcp`.
 
 ### Codex (OpenAI CLI)

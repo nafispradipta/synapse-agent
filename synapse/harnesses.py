@@ -66,18 +66,18 @@ def _json_merge_opencode(cfg: Dict[str, Any], db_path: str) -> Dict[str, Any]:
     return cfg
 
 
+def sys_platform() -> str:
+    import sys
+
+    return sys.platform
+
+
 def _detect_claude_desktop() -> bool:
     if os.name == "nt":
         return (_appdata() / "Claude").exists()
     if sys_platform() == "darwin":
         return (HOME / "Library" / "Application Support" / "Claude").exists()
     return (_config_home() / "Claude").exists()
-
-
-def sys_platform() -> str:
-    import sys
-
-    return sys.platform
 
 
 def _path_claude_desktop() -> Path:
