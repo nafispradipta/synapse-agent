@@ -331,18 +331,6 @@ To maintain transparency and help developers choose the right tool for their arc
 
 ---
 
-## Documentation
-
-- [docs/README.md](docs/README.md): documentation index and update rules.
-- [docs/Architecture.md](docs/Architecture.md): components, data flow, schema, and known limits.
-- [docs/Operations.md](docs/Operations.md): install, configuration, MCP setup, maintenance, and troubleshooting.
-- [docs/Harness_Setup.md](docs/Harness_Setup.md): connect Synapse to Claude, Codex, OpenCode, and other MCP harnesses.
-- [docs/Product.md](docs/Product.md): capabilities, non-goals, and functional requirements.
-- [docs/Security_Privacy.md](docs/Security_Privacy.md): trust boundaries, credentials, and residual risks.
-- [docs/Status.md](docs/Status.md): current state, blockers, and next actions.
-- [docs/Dokumentasi_user.md](docs/Dokumentasi_user.md): non-technical Indonesian overview.
-- [AGENTS.md](AGENTS.md): rules for AI coding agents working in this repository.
-
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
