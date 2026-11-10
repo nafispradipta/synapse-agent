@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Documentation Source of Truth:** `AGENTS.md` was rewritten with verified commands, environment variables, the documentation map, and the review workflow. `docs/` now contains the architecture, product, operations, security, status, roadmap, changelog policy, non-technical user guide, and archive convention. `docs/Changelog.md` points at this file instead of duplicating history.
 - **Consistency Cleanup:** Current test counts in `README.md`, the supported version in `SECURITY.md`, and the changelog section order were corrected. `CONTRIBUTING.md` now requires documentation updates and independent review.
+- **Seamless Harness Setup (1.2.0):** New `synapse` CLI with `setup` (auto-detects Claude Desktop, Claude Code, Codex, OpenCode and writes their MCP config) and `doctor` (verifies import, storage, and harness config). Added `synapse/harnesses.py` registry, `examples/mcp-clients/` templates, and `docs/Harness_Setup.md`. One-line installer deferred.
 
 ### Changed
 - **Storage Encapsulation:** `Retriever` and `Worker` no longer reach into `SynapseStorage._conn` / `_lock`. All cross-module database work now goes through named data-access methods (for example `record_node_access` and `commit_superseded_rollup`), so locking and transaction boundaries stay inside one owner.

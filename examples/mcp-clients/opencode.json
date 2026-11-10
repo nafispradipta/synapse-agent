@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "servers": {
+      "synapse": {
+        "type": "local",
+        "command": ["synapse-mcp"],
+        "environment": {
+          "SYNAPSE_DB_PATH": "/absolute/path/to/synapse.db"
+        },
+        "enabled": true
+      }
+    }
+  }
+}

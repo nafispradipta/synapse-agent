@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "synapse": {
+      "command": "synapse-mcp",
+      "env": {
+        "SYNAPSE_DB_PATH": "/absolute/path/to/synapse.db"
+      }
+    }
+  }
+}
