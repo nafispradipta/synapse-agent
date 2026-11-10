@@ -17,7 +17,8 @@ import time
 from typing import List
 
 import pytest
-import numpy as np
+
+np = pytest.importorskip("numpy")
 
 from synapse.storage import SynapseStorage, _NUMPY_AVAILABLE
 
