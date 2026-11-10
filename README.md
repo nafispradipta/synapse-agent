@@ -5,7 +5,7 @@
 [![PyPI: synapse-cortex](https://img.shields.io/pypi/v/synapse-cortex.svg)](https://pypi.org/project/synapse-cortex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-brightgreen.svg)](pyproject.toml)
-[![Tests: 362 Passed](https://img.shields.io/badge/Tests-362%20Passed-success.svg)](tests/)
+[![Tests: 399 Passed](https://img.shields.io/badge/Tests-399%20Passed-success.svg)](tests/)
 [![Architecture: Local--First](https://img.shields.io/badge/Architecture-Local--First%20SQLite%20WAL-purple.svg)](synapse/storage.py)
 
 ---
@@ -48,7 +48,7 @@ AI agents without memory forget everything between sessions. However, naive vect
                           └─────────────────┘
 ```
 
-1. **`retain()` — Micro-Episodic Storage:** Extracts atomic facts, categorizes knowledge (`architecture`, `sop`, `decision`, `preference`, `incident`), generates 384-dim dense vectors, and establishes synaptic associative graph edges.
+1. **`retain()` - Micro-Episodic Storage:** Extracts atomic facts, categorizes knowledge (`architecture`, `sop`, `decision`, `preference`, `incident`), generates dense vectors (384-dimensional by default), and establishes synaptic associative graph edges.
 2. **`recall()` — Hybrid Spreading Activation:** Combines SQLite FTS5 (BM25 lexical search), dense vector cosine similarity, and multi-hop graph spreading activation. Context is packed progressively using multi-tiered token budgeting (L0 Abstract < 40 tokens, L1 Overview < 300 tokens).
 3. **`reflect()` — Cascading Belief Revision:** Resolves factual contradictions, supersedes stale beliefs, applies Hebbian reinforcement based on retrieval co-activation, and rolls up obsolete nodes into compact abstract summaries.
 
@@ -63,6 +63,8 @@ The quickest way to install Synapse Cortex and the `synapse-mcp` server binary:
 ```bash
 pip install synapse-cortex
 ```
+
+> **PyPI may lag the repository.** The latest published release can be older than the source version in `pyproject.toml`. For the current source features, use the source install below.
 
 *(Or for optional development and testing tools: `pip install "synapse-cortex[dev]"`).*
 
@@ -168,9 +170,9 @@ Add the `synapse` entry to your assistant's MCP configuration (`mcpServers` bloc
 }
 ```
 
-> **Shared Memory Pool:** By default, `synapse-mcp` automatically stores memory in `~/.synapse/synapse.db`. This means all your AI assistants (Claude, Cursor, terminal agents) **automatically share the exact same persistent brain** across all projects on your machine.
+> **Shared Memory Pool:** `synapse-mcp` resolves its database in this order: `SYNAPSE_DB_PATH` when set; otherwise an existing `./data/synapse.db` in the server's working directory; otherwise `~/.synapse/synapse.db`. In the common case all your AI assistants (Claude, Cursor, terminal agents) share one persistent brain on the machine.
 >
-> If you prefer an isolated database for a specific project, simply add the `SYNAPSE_DB_PATH` environment variable:
+> If you prefer an isolated database for a specific project, always set `SYNAPSE_DB_PATH` explicitly:
 > ```json
 > {
 >   "mcpServers": {
@@ -225,7 +227,7 @@ Synapse operates using two complementary cognitive engines: **The Embedding Engi
 
 ### 1. The Embedding Engine (Vector Search)
 
-Synapse generates 384-dimensional dense vectors to power hybrid retrieval (BM25 lexical + vector cosine similarity):
+Synapse generates dense vectors (384-dimensional by default) to power hybrid retrieval (BM25 lexical + vector cosine similarity):
 
 - **Zero-Dependency Built-In Fallback:** If no external libraries are installed, Synapse automatically uses a built-in deterministic subword n-gram vectorizer. It requires **zero external packages, zero model downloads, and zero API costs**.
 - **Neural Embeddings (Optional):** If you install `sentence-transformers`, Synapse seamlessly upgrades to neural embeddings using `all-MiniLM-L6-v2` (or your configured `SYNAPSE_EMBEDDING_MODEL`):
@@ -246,6 +248,18 @@ Copy the environment template:
 
 ```bash
 cp .env.example .env
+```
+
+The library reads process environment variables directly and does not load `.env` by itself. Export the file in your shell before running a command, or set the variables in your MCP client's `env` block.
+
+```bash
+# POSIX
+set -a; source .env; set +a
+```
+
+```powershell
+# PowerShell: set individual variables
+$env:SYNAPSE_DB_PATH = "./data/synapse.db"
 ```
 
 Edit `.env` according to your requirements:
@@ -284,7 +298,7 @@ python -m pytest
 ```
 
 ```text
-================================ 362 passed in 24.00s =============================
+================================ 399 passed in 31.38s =============================
 ```
 
 - **Belief Revision & Contradiction Resolution:** `test_contradiction_resolver.py`
@@ -312,10 +326,21 @@ To maintain transparency and help developers choose the right tool for their arc
    - This design is lightweight and optimal for personal and team agent memory graphs (<10,000 active nodes). It is not designed to replace high-scale multi-million vector databases (Milvus, Pinecone).
 
 4. **Multi-Project Isolation:**
-   - By default, `synapse-mcp` defaults to `~/.synapse/synapse.db` so multiple assistants share context across repositories.
+   - `synapse-mcp` uses `SYNAPSE_DB_PATH` when set, then an existing `./data/synapse.db`, then `~/.synapse/synapse.db`. Without an explicit variable, assistants can share context across repositories.
    - For strictly isolated project environments, always set `SYNAPSE_DB_PATH=./data/synapse.db`.
 
 ---
+
+## Documentation
+
+- [docs/README.md](docs/README.md): documentation index and update rules.
+- [docs/Architecture.md](docs/Architecture.md): components, data flow, schema, and known limits.
+- [docs/Operations.md](docs/Operations.md): install, configuration, MCP setup, maintenance, and troubleshooting.
+- [docs/Product.md](docs/Product.md): capabilities, non-goals, and functional requirements.
+- [docs/Security_Privacy.md](docs/Security_Privacy.md): trust boundaries, credentials, and residual risks.
+- [docs/Status.md](docs/Status.md): current state, blockers, and next actions.
+- [docs/Dokumentasi_user.md](docs/Dokumentasi_user.md): non-technical Indonesian overview.
+- [AGENTS.md](AGENTS.md): rules for AI coding agents working in this repository.
 
 ## License
 

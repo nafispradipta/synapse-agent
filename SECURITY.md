@@ -4,7 +4,10 @@
 
 | Version | Supported          |
 | :------ | :----------------- |
-| 1.0.x   | Yes                |
+| 1.1.x   | Yes                |
+| < 1.1   | No                 |
+
+The security and privacy model is documented in [docs/Security_Privacy.md](docs/Security_Privacy.md).
 
 ## Reporting a Vulnerability
 

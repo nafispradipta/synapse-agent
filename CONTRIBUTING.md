@@ -39,6 +39,9 @@ python -m pytest --cov=synapse
 - **Zero Emojis:** Maintain a clean, professional codebase and documentation style without emojis.
 - **English Codebase:** All code comments, docstrings, variable names, and commit messages must be in English.
 - **Atomic Commits:** Provide clear, imperative commit messages (e.g. `feat: add graph cycle detection`, `fix: handle missing db directory`).
+- **Documentation Is Part of the Change:** Update the owning document under `docs/`, `docs/Status.md`, and the root `CHANGELOG.md` in the same change. The index in [docs/README.md](docs/README.md) lists which document owns which facts.
+- **Independent Review:** Before merging, have the change reviewed read-only against the code, tests, and documentation. Fix every finding before sign-off.
+- **Verified Claims:** Run `python -m pytest` and any command you document. Do not state a version, test count, path, or environment variable that you have not checked against the repository.
 
 ## Submitting a Pull Request
 

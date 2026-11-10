@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Documentation Source of Truth:** `AGENTS.md` was rewritten with verified commands, environment variables, the documentation map, and the review workflow. `docs/` now contains the architecture, product, operations, security, status, roadmap, changelog policy, non-technical user guide, and archive convention. `docs/Changelog.md` points at this file instead of duplicating history.
+- **Consistency Cleanup:** Current test counts in `README.md`, the supported version in `SECURITY.md`, and the changelog section order were corrected. `CONTRIBUTING.md` now requires documentation updates and independent review.
+
+### Changed
+- **Storage Encapsulation:** `Retriever` and `Worker` no longer reach into `SynapseStorage._conn` / `_lock`. All cross-module database work now goes through named data-access methods (for example `record_node_access` and `commit_superseded_rollup`), so locking and transaction boundaries stay inside one owner.
+- **Schema Initialisation Decomposed:** The 337-line `_init_schema` is now a short orchestrator over seven per-table helpers plus module-level `_DDL_*` constants and index/trigger tuples. The legacy `synapse_nodes` rebuild lives in its own method.
+- **Storage Split into Bounded Contexts:** `SynapseStorage` is now a small facade over six mixins in `synapse/stores/` — `SchemaMixin` (DDL and migrations), `GraphStore` (nodes, edges, FTS), `VectorStore` (embeddings and the matrix cache), `EpisodeStore`, `KnowledgeStore` (mental models, observations, research) and `MaintenanceStore` (decay, rollups, compaction). The facade keeps the connection, the embedder hook, and cross-context aggregates such as `get_stats`. Method bodies moved verbatim; `from synapse.storage import SynapseStorage, VALID_CATEGORIES, VALID_STATUSES` keeps working.
+- **Maintenance Operations Live in the Storage Layer:** The eight SQL operations `scripts/nightly_consolidation.py` used to issue against its own connection are now named methods on `MaintenanceStore` — `lock_critical_nodes`, `apply_hebbian_decay`, `prune_exhausted_nodes`, `prune_weak_edges`, `upsert_vault_node`, `optimize_fts_indices`, `verify_integrity`, `wal_checkpoint`. The vault upsert preserves `salience`, `strength`, `last_accessed` and `access_count` on re-ingest. `scripts/wal_checkpoint.py` and the consolidation pipeline now talk to storage through `SynapseStorage`; neither module opens a raw `sqlite3` connection any more.
+- **One Connection Per Consolidation Run:** Steps 2.5, 4.3, 9.5 and the contradiction audit no longer open a separate `SynapseStorage` instance; they reuse the single instance bound to the `db_path` argument (sourced from `SYNAPSE_DB_PATH` or `SYNAPSE_DATA_DIR`). `PRAGMA busy_timeout=10000` is now applied by storage so the consolidation job and the app can share the WAL without starving each other.
+- **Expanded Test Suite:** 399 automated tests, including 17 encapsulation guards, 26 schema-contract characterisation tests, 12 bounded-context boundary tests and 14 nightly-maintenance behaviour tests.
+
+### Fixed
+- **Legacy Node Migration Dropped `access_count`:** Rebuilding `synapse_nodes` for pre-1.0.3 databases recreated the table without `access_count`, so creating `idx_synapse_nodes_access_count` failed with `no such column: access_count`. The rebuild now carries the column over.
+- **Legacy Migration Silently Disabled Foreign Keys:** `PRAGMA foreign_keys=ON` was issued after the row copy, but the copy opens an implicit transaction and the pragma is a no-op inside one — so every `ON DELETE CASCADE` silently stopped firing after a pre-1.0.3 migration. Enforcement is now restored before the connection is used.
+- **Consolidation Targeted the Wrong Database with `skip_external`:** Step 2.5 ignored the `db_path` argument and consolidated the global default database instead of the requested one; it now uses `target_db` and honours `skip_external`.
+
 ## [1.1.1] - 2026-11-06
 
 ### Fixed
@@ -32,28 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Compaction Status Honesty:** `optimize_and_compact` sets `results["status"] = compaction_status(results)` and a module-level `compaction_status` helper returns `"partial"` when any step recorded an error.
 
 ### Added
-- **Test Isolation:** `tests/conftest.py` redirects `HOME`/`USERPROFILE` to `tmp_path` and strips all `SYNAPSE_*`/`OPENAI_*` env vars per test. Adapter's default research dir moved from `./data/research/auto_harvest` to `~/.synapse/research/auto_harvest`, so the suite no longer writes `data/` into the repo.
+- **Test Isolation:** `tests/conftest.py` redirects `HOME`/`USERPROFILE` to `tmp_path` and strips a fixed list of Synapse and OpenAI environment variables per test. Adapter's default research dir moved from `./data/research/auto_harvest` to `~/.synapse/research/auto_harvest`, so the suite no longer writes `data/` into the repo.
 - **Schema Versioning:** `PRAGMA user_version` is stamped to 1 on init and a one-shot migration narrows the FTS `AFTER UPDATE` triggers to only fire on text-column changes, removing read-touch FTS churn.
 
 ### Changed
 - **CI:** `.github/workflows/ci.yml` runs `python -m pytest -q` on `ubuntu-latest` for Python `3.9` and `3.12` on every push/pull request to `main`.
 - **Docs Cleanup:** README/CONTRIBUTING now document `python -m pytest` (no bare `pytest`), test counts (351) and the real default database path (`~/.synapse/synapse.db`). `.env.example` dropped dead keys (`SYNAPSE_TOKEN_BUDGET`, `SYNAPSE_L0_BUDGET`, `SYNAPSE_L1_BUDGET`, `SYNAPSE_SYNC_STATE_PATH`) and documents `SYNAPSE_RESEARCH_DIR`.
 - **Version Source:** `SERVER_VERSION` in `synapse/mcp.py` now resolves via `importlib.metadata` and falls back to `pyproject.toml`, so server, package and docs cannot drift.
-
-## [Unreleased]
-
-### Changed
-- **Storage Encapsulation:** `Retriever` and `Worker` no longer reach into `SynapseStorage._conn` / `_lock`. All cross-module database work now goes through named data-access methods (`bump_access_count`, `load_vector_index`, `iter_due_nodes`, `commit_superseded_rollup`, and friends), so locking and transaction boundaries stay inside one owner.
-- **Schema Initialisation Decomposed:** The 337-line `_init_schema` is now a short orchestrator over seven per-table helpers plus module-level `_DDL_*` constants and index/trigger tuples. The legacy `synapse_nodes` rebuild lives in its own method.
-- **Storage Split into Bounded Contexts:** `SynapseStorage` is now a 154-line facade over six mixins in `synapse/stores/` — `SchemaMixin` (DDL and migrations), `GraphStore` (nodes, edges, FTS), `VectorStore` (embeddings and the matrix cache), `EpisodeStore`, `KnowledgeStore` (mental models, observations, research) and `MaintenanceStore` (decay, rollups, compaction). The facade keeps the connection, the embedder hook, and cross-context aggregates such as `get_stats`. Method bodies moved verbatim; `from synapse.storage import SynapseStorage, VALID_CATEGORIES, VALID_STATUSES` keeps working.
-- **Maintenance Operations Live in the Storage Layer:** The eight SQL operations `scripts/nightly_consolidation.py` used to issue against its own connection are now named methods on `MaintenanceStore` — `lock_critical_nodes`, `apply_hebbian_decay`, `prune_exhausted_nodes`, `prune_weak_edges`, `upsert_vault_node`, `optimize_fts_indices`, `verify_integrity`, `wal_checkpoint`. The vault upsert preserves `salience`, `strength`, `last_accessed` and `access_count` on re-ingest. `scripts/wal_checkpoint.py` and the consolidation pipeline now talk to storage through `SynapseStorage`; neither module opens a raw `sqlite3` connection any more.
-- **One Connection Per Consolidation Run:** Steps 2.5, 4.3, 9.5 and the contradiction audit no longer open a separate `SynapseStorage` instance; they reuse the single instance bound to the `--db-path` argument. `PRAGMA busy_timeout=10000` is now applied by storage so the consolidation job and the app can share the WAL without starving each other.
-- **Expanded Test Suite:** 318 automated tests, including 17 encapsulation guards, 17 schema-contract characterisation tests, 12 bounded-context boundary tests and 14 nightly-maintenance behaviour tests.
-
-### Fixed
-- **Legacy Node Migration Dropped `access_count`:** Rebuilding `synapse_nodes` for pre-1.0.3 databases recreated the table without `access_count`, so creating `idx_synapse_nodes_access_count` failed with `no such column: access_count`. The rebuild now carries the column over.
-- **Legacy Migration Silently Disabled Foreign Keys:** `PRAGMA foreign_keys=ON` was issued after the row copy, but the copy opens an implicit transaction and the pragma is a no-op inside one — so every `ON DELETE CASCADE` silently stopped firing after a pre-1.0.3 migration. Enforcement is now restored before the connection is used.
-- **Consolidation Targeted the Wrong Database with `skip_external`:** Step 2.5 ignored the `--db-path` argument and consolidated the global default database instead of the requested one; it now uses `target_db` and honours `skip_external`.
 
 ## [1.0.5] - 2026-11-04
 
